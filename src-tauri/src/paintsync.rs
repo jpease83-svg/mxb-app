@@ -517,6 +517,22 @@ pub fn server_key_for(servers: &[RegisteredServer], address: &str) -> String {
         .unwrap_or(wanted)
 }
 
+/// Resolve the server name FrostMod observed from `EventInit` to one registry row.
+///
+/// Names are not globally unique, so ambiguity deliberately returns `None`; the caller then
+/// falls back to the broad registry sync instead of putting a rider in the wrong roster.
+pub fn server_key_for_name(servers: &[RegisteredServer], name: &str) -> Option<String> {
+    let wanted = name.trim();
+    if wanted.is_empty() {
+        return None;
+    }
+    let mut matches = servers
+        .iter()
+        .filter(|s| s.name.trim().eq_ignore_ascii_case(wanted));
+    let first = matches.next()?;
+    matches.next().is_none().then(|| first.id.clone())
+}
+
 #[derive(Deserialize)]
 struct RosterRider {
     #[serde(rename = "riderName")]
@@ -832,6 +848,27 @@ mod tests {
     fn falls_back_to_the_normalized_address_when_unregistered() {
         assert_eq!(server_key_for(&registry(), "192.0.2.1"), "192.0.2.1:54210");
         assert_eq!(server_key_for(&[], "192.0.2.1:6000"), "192.0.2.1:6000");
+    }
+
+    #[test]
+    fn matches_the_unique_server_name_frostmod_observed() {
+        assert_eq!(
+            server_key_for_name(&registry(), "  eu 1 "),
+            Some("eu-frankfurt-1".into())
+        );
+        assert_eq!(server_key_for_name(&registry(), "missing"), None);
+    }
+
+    #[test]
+    fn refuses_to_guess_between_duplicate_server_names() {
+        let mut servers = registry();
+        servers.push(RegisteredServer {
+            id: "eu-frankfurt-2".into(),
+            name: "EU 1".into(),
+            region: "eu".into(),
+            address: "203.0.113.11".into(),
+        });
+        assert_eq!(server_key_for_name(&servers, "EU 1"), None);
     }
 
     #[test]

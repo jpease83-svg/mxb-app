@@ -1,4 +1,79 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+
+/// The small, read-only session snapshot FrostMod's PiBoSo output plugin writes beside the
+/// game plugin. It closes the one gap the normal app cannot: which server was selected in
+/// MX Bikes' own browser, and the local GUID PiBoSo only exposes in-process.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionState {
+    pub schema_version: u8,
+    pub connected: bool,
+    pub server_name: String,
+    pub track_id: String,
+    pub guid: String,
+}
+
+const SESSION_FILE: &str = "frostmod_session.json";
+const MAX_SESSION_BYTES: u64 = 4096;
+
+/// The first FrostMod whose launcher recognizes its `.dlo` copy as already loaded.
+/// Installing an older DLL as an output plugin and then starting its launcher would load
+/// FrostMod twice, so the app must not create the plugin copy below this version.
+pub const SESSION_BRIDGE_MIN_VERSION: &str = "v0.14.0";
+
+/// Read a currently connected session from `<MX Bikes>/plugins`.
+///
+/// A malformed or future document is absence, not a failed sync. FrostMod writes atomically,
+/// but the size and field checks still make this a deliberately narrow cross-process contract.
+pub fn session_state(cfg: &crate::config::AppConfig) -> Option<SessionState> {
+    let install = cfg.install_dir();
+    if install.trim().is_empty() {
+        return None;
+    }
+    let path = std::path::Path::new(&install).join("plugins").join(SESSION_FILE);
+    let meta = std::fs::metadata(&path).ok()?;
+    if meta.len() == 0 || meta.len() > MAX_SESSION_BYTES {
+        return None;
+    }
+    parse_session_state(&std::fs::read(path).ok()?)
+}
+
+fn parse_session_state(bytes: &[u8]) -> Option<SessionState> {
+    if bytes.is_empty() || bytes.len() as u64 > MAX_SESSION_BYTES {
+        return None;
+    }
+    let mut state: SessionState = serde_json::from_slice(bytes).ok()?;
+    state.server_name = state.server_name.trim().to_string();
+    state.track_id = state.track_id.trim().to_string();
+    state.guid = state.guid.trim().to_string();
+    if state.schema_version != 1
+        || !state.connected
+        || state.server_name.len() < 2
+        || state.server_name.len() > 64
+        || state.server_name.chars().any(char::is_control)
+        || state.track_id.len() > 100
+        || state.track_id.chars().any(char::is_control)
+        || (!state.guid.is_empty() && !valid_session_guid(&state.guid))
+    {
+        return None;
+    }
+    Some(state)
+}
+
+fn valid_session_guid(guid: &str) -> bool {
+    (4..=100).contains(&guid.len())
+        && guid
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | ':' | '-'))
+}
+
+/// Is this FrostMod release safe for MXB App to install as an output plugin?
+pub fn session_bridge_is_safe(tag: Option<&str>) -> bool {
+    match (tag.and_then(version_parts), version_parts(SESSION_BRIDGE_MIN_VERSION)) {
+        (Some(have), Some(min)) => have >= min,
+        _ => false,
+    }
+}
 
 // Must match the event name in frostmod's launcher.cpp / frostmod.cpp exactly.
 #[cfg(windows)]
@@ -390,6 +465,41 @@ pub fn supported_for_game(game: crate::game::Game, tag: Option<&str>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_the_session_contract_frostmod_writes() {
+        let state = parse_session_state(
+            br#"{"schemaVersion":1,"connected":true,"serverName":"Average MX | Race 1","trackId":"Farm14","guid":"ABC-123_45"}"#,
+        )
+        .unwrap();
+        assert_eq!(state.server_name, "Average MX | Race 1");
+        assert_eq!(state.track_id, "Farm14");
+        assert_eq!(state.guid, "ABC-123_45");
+    }
+
+    #[test]
+    fn ignores_disconnected_malformed_or_future_sessions() {
+        for bad in [
+            br#"{"schemaVersion":1,"connected":false,"serverName":"Average MX","trackId":"Farm14","guid":"ABC-123"}"#.as_slice(),
+            br#"{"schemaVersion":2,"connected":true,"serverName":"Average MX","trackId":"Farm14","guid":"ABC-123"}"#.as_slice(),
+            br#"{"schemaVersion":1,"connected":true,"serverName":"A","trackId":"Farm14","guid":"ABC-123"}"#.as_slice(),
+            br#"{"schemaVersion":1,"connected":true,"serverName":"Average MX","trackId":"Farm14","guid":"bad guid"}"#.as_slice(),
+            b"not json".as_slice(),
+        ] {
+            assert!(parse_session_state(bad).is_none(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn only_the_session_aware_launcher_is_installed_as_a_plugin() {
+        assert!(!session_bridge_is_safe(Some("v0.13.0")));
+        assert!(!session_bridge_is_safe(Some("v0.13.99")));
+        assert!(session_bridge_is_safe(Some("v0.14.0")));
+        assert!(session_bridge_is_safe(Some("v0.14.0-rc1")));
+        assert!(session_bridge_is_safe(Some("v1.0.0")));
+        assert!(!session_bridge_is_safe(None));
+        assert!(!session_bridge_is_safe(Some("nightly")));
+    }
 
     #[test]
     fn swap_command_json_shape_and_escaping() {

@@ -56,6 +56,10 @@ hours), then downloads and installs them on restart.
   starts it in there rather than beside itself, and reaches it with a command file
   instead of a Windows event (nothing outside a Wine prefix can pulse one). Needs
   FrostMod v0.13.0 or newer, which is what reads that file.
+- **Live paint sync**: FrostMod v0.14.0+ reports the joined server and local rider GUID
+  through a small output-plugin session file. MXB App uses that identity to pull only the
+  matching server roster, install bike/helmet/gear paints, and signal the same live reload
+  path—even when the rider joined through MX Bikes' built-in browser.
 - **Paint studio**: builds a `.pnt` from `.tga`/`.png` sheets, and unpacks an
   existing paint back into editable sheets that keep the texture names the model
   binds — so a livery made anywhere can be packed, installed and previewed here.

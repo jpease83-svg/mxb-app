@@ -4528,6 +4528,11 @@ fn sync_paints_soon(app: &tauri::AppHandle, address: Option<String>) {
 /// long enough that an unchanged roster — the overwhelmingly common answer — costs nothing.
 const LIVE_SYNC_EVERY: std::time::Duration = std::time::Duration::from_secs(45);
 
+/// FrostMod writes the session snapshot from the game's EventInit callback. Polling this
+/// tiny local file lets an in-browser join trigger its first exact-roster pull immediately,
+/// without turning the control-plane roster itself into a high-frequency poll.
+const SESSION_BRIDGE_POLL_EVERY: std::time::Duration = std::time::Duration::from_secs(1);
+
 /// How long to wait for the game to show up before giving up on a session.
 ///
 /// MX Bikes takes a while to appear in the process list, and on a platform where we cannot
@@ -4548,8 +4553,18 @@ fn live_sync_session(app: &tauri::AppHandle, address: Option<String>) {
     tauri::async_runtime::spawn(async move {
         let started = std::time::Instant::now();
         let mut seen_running = false;
+        let mut observed_server: Option<String> = None;
+        let mut next_periodic_pull = std::time::Instant::now() + LIVE_SYNC_EVERY;
         loop {
-            tokio::time::sleep(LIVE_SYNC_EVERY).await;
+            // A direct-address launch already knows its server, so it needs only the normal
+            // roster cadence. An in-game-browser launch waits on a cheap local file and pulls
+            // the network roster only when the connected server changes or the cadence is due.
+            let wait = if address.is_some() {
+                LIVE_SYNC_EVERY
+            } else {
+                SESSION_BRIDGE_POLL_EVERY
+            };
+            tokio::time::sleep(wait).await;
 
             let cfg = config::load_or_detect(&app).unwrap_or_default();
             if !cfg.experimental_enabled() || cfg.cp_token.trim().is_empty() {
@@ -4562,6 +4577,16 @@ fn live_sync_session(app: &tauri::AppHandle, address: Option<String>) {
                 log::info!("[sync] session over, stopping the live sync");
                 return;
             }
+
+            let session_server = (address.is_none() && gameproc::is_game_running())
+                .then(|| frostmod::session_state(&cfg).map(|s| s.server_name))
+                .flatten();
+            let session_changed = session_server.is_some() && session_server != observed_server;
+            observed_server = session_server;
+            if !session_changed && std::time::Instant::now() < next_periodic_pull {
+                continue;
+            }
+            next_periodic_pull = std::time::Instant::now() + LIVE_SYNC_EVERY;
 
             match pull_rosters(&app, address.clone()).await {
                 // Only say so when something actually arrived: an unchanged grid is the
@@ -4600,9 +4625,39 @@ async fn pull_rosters(
         }
     };
 
+    // When MXB App launched the connection, `address` is the strongest identity. When the
+    // player used MX Bikes' own browser, FrostMod's output-plugin callback is the only place
+    // the selected server and local GUID surface. Ignore a stale file while the game is not
+    // running; EventDeinit normally clears it, but a crashed process never gets that callback.
+    let session = (address.is_none() && gameproc::is_game_running())
+        .then(|| frostmod::session_state(&cfg))
+        .flatten();
+
+    // The same GUID claim that used to require owning the server now works on any joined
+    // server, because EventInit gives the local client its own GUID directly.
+    if cfg.cp_guid.trim().is_empty() {
+        if let Some(guid) = session.as_ref().map(|s| s.guid.trim()).filter(|g| !g.is_empty()) {
+            match claim_guid(app, guid).await {
+                Ok(()) => log::info!("[sync] claimed local GUID {guid} from FrostMod session"),
+                Err(e) => log::warn!("[sync] couldn't claim local GUID {guid}: {e}"),
+            }
+        }
+    }
+
     let keys: Vec<String> = match &address {
         Some(addr) => vec![paintsync::server_key_for(&registry, addr)],
-        None => registry.iter().map(|s| s.id.clone()).collect(),
+        None => match session
+            .as_ref()
+            .and_then(|s| paintsync::server_key_for_name(&registry, &s.server_name))
+        {
+            Some(key) => {
+                log::debug!("[sync] FrostMod session matched registered server {key}");
+                vec![key]
+            }
+            // No session yet, an unregistered server, or two registry rows with the same
+            // display name: the previous broad sync is the safe fallback.
+            None => registry.iter().map(|s| s.id.clone()).collect(),
+        },
     };
     if keys.is_empty() {
         return Err("No servers to sync with yet.".into());
@@ -8759,5 +8814,3 @@ mod viewer_tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 }
-
-
