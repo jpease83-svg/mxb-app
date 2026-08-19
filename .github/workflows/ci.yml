@@ -124,6 +124,47 @@ jobs:
       - name: Test
         run: npx vitest run
 
+  # A fork cannot use the canonical repository's updater-signing key. Manual CI runs
+  # therefore also produce a Windows-only, unsigned test installer with updater artifacts
+  # disabled. It installs under a separate app identity so testing cannot replace a normal
+  # MXB App installation.
+  windows-test-installer:
+    name: Windows paint-sync test installer
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build isolated unsigned installer
+        run: npm run tauri -- build --ci --bundles nsis --no-sign --config .github/test-tauri.conf.json
+
+      - name: Upload Windows test build
+        uses: actions/upload-artifact@v4
+        with:
+          name: mxb-app-paintsync-windows-test
+          path: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/MXB App.exe
+          if-no-files-found: error
+
   server-agent:
     name: Server agent (test)
     runs-on: ubuntu-latest

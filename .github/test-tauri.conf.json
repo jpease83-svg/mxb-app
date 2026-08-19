@@ -1,0 +1,14 @@
+{
+  "productName": "MXB App Paint Sync Test",
+  "identifier": "com.peasey.mxbikes.paintsync-test",
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/jpease83-svg/mxb-app/releases/latest/download/latest.json"
+      ]
+    }
+  },
+  "bundle": {
+    "createUpdaterArtifacts": false
+  }
+}
