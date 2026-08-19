@@ -17,7 +17,7 @@ use std::path::{Component, Path, PathBuf};
 
 /// Where the control plane lives. A constant rather than a setting: pointing the app at
 /// another host would let anything served there write files into the mods folder.
-pub const CONTROL_PLANE: &str = "https://mxb-control-plane.aui-svi.workers.dev";
+pub const CONTROL_PLANE: &str = "https://amx-paint-sync.jpease83-amx.workers.dev";
 
 /// Set to a base URL to talk to a control plane other than the real one. **Debug builds
 /// only** — see [`control_plane`].
