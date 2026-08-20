@@ -533,6 +533,23 @@ pub fn server_key_for_name(servers: &[RegisteredServer], name: &str) -> Option<S
     matches.next().is_none().then(|| first.id.clone())
 }
 
+/// A stable roster key for a server FrostMod observed through MX Bikes' own browser.
+///
+/// Community hosts such as CBR do not need to run our server agent or appear in our
+/// registry. Riders who see the same server name and track derive the same opaque key, while
+/// the hash keeps arbitrary display text out of URLs and database grouping keys.
+pub fn session_server_key(name: &str, track_id: &str) -> Option<String> {
+    let name = name.trim().to_lowercase();
+    let track_id = track_id.trim().to_lowercase();
+    if name.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "session-{}",
+        sha256_bytes(format!("v1\0{name}\0{track_id}").as_bytes())
+    ))
+}
+
 #[derive(Deserialize)]
 struct RosterRider {
     #[serde(rename = "riderName")]
@@ -869,6 +886,16 @@ mod tests {
             address: "203.0.113.11".into(),
         });
         assert_eq!(server_key_for_name(&servers, "EU 1"), None);
+    }
+
+    #[test]
+    fn community_sessions_share_a_stable_opaque_roster_key() {
+        let key = session_server_key("  AMX Series ", "755 Compound").unwrap();
+        assert_eq!(key, session_server_key("amx series", "755 compound").unwrap());
+        assert!(key.starts_with("session-"));
+        assert_eq!(key.len(), "session-".len() + 64);
+        assert_ne!(key, session_server_key("AMX Series", "Farm 14").unwrap());
+        assert_eq!(session_server_key("  ", "Farm 14"), None);
     }
 
     #[test]
