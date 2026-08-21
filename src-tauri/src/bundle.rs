@@ -131,7 +131,13 @@ pub fn plan_many_for_bikes(cfg: &AppConfig, loadouts: &[(String, Loadout)]) -> V
         .iter()
         .map(|(bike_id, loadout)| {
             let mut p = resolve_with(cfg, &libs, loadout, Some(bike_id));
-            dedup_assets(&mut p.assets);
+            // Paint sync consumes individual `.pnt` assets, not the complete preset bundle.
+            // The normal bundle deduplicator deliberately removes a paint when its parent
+            // model folder is already present (for example `rider/helmets/AGV` contains
+            // `paints/Blue.pnt`). That is correct for a zip, but it made helmet, boot and
+            // protection paints disappear here because the sync layer filters model folders
+            // out. Keep nested assets addressed individually; only remove exact duplicates.
+            dedup_exact_assets(&mut p.assets);
             p.total_size = p.assets.iter().map(|a| a.size).sum();
             p
         })
@@ -329,6 +335,15 @@ fn dedup_assets(assets: &mut Vec<AssetRef>) {
             a.rel_dest != *d && a.rel_dest.starts_with(&format!("{d}/"))
         })
     });
+}
+
+/// Remove the same destination twice without treating a containing model folder as the asset.
+///
+/// A complete preset archive uses [`dedup_assets`]; paint sync needs this narrower form so it
+/// can hash and publish each nested paint separately.
+fn dedup_exact_assets(assets: &mut Vec<AssetRef>) {
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    assets.retain(|asset| seen.insert(asset.rel_dest.clone()));
 }
 
 /// Total bytes under `dir`, following the links a mods tree is full of. Shared with
@@ -764,6 +779,36 @@ mod tests {
             .map(|a| a.rel_dest.as_str())
             .collect::<Vec<_>>();
         assert_eq!(paints, vec!["bikes/YZ250/paints/Race.pnt"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn profile_paint_resolution_keeps_paints_nested_in_rider_models() {
+        let root = tmp("profile-rider-paints");
+        // A full preset bundle can represent each of these paints through the containing
+        // model folder. Live paint sync cannot: it uploads individual `.pnt` files only.
+        touch(&root.join("mods/rider/helmets/AGV/model.edf"));
+        touch(&root.join("mods/rider/helmets/AGV/paints/Blue.pnt"));
+        touch(&root.join("mods/rider/boots/Tech10/model.edf"));
+        touch(&root.join("mods/rider/boots/Tech10/paints/White.pnt"));
+
+        let cfg = AppConfig { mods_path: root.to_string_lossy().into_owned(), ..Default::default() };
+        let mut loadout = Loadout::default();
+        loadout.helmet = "AGV".into();
+        loadout.helmet_paint = "Blue".into();
+        loadout.boots = "Tech10".into();
+        loadout.boots_paint = "White".into();
+
+        let plans = plan_many_for_bikes(&cfg, &[("YZ250".to_string(), loadout)]);
+        let dest = |slot: &str| {
+            plans[0]
+                .assets
+                .iter()
+                .find(|asset| asset.slot == slot)
+                .map(|asset| asset.rel_dest.as_str())
+        };
+        assert_eq!(dest("helmet_paint"), Some("rider/helmets/AGV/paints/Blue.pnt"));
+        assert_eq!(dest("boots_paint"), Some("rider/boots/Tech10/paints/White.pnt"));
         let _ = std::fs::remove_dir_all(&root);
     }
 
