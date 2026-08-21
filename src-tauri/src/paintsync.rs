@@ -251,7 +251,7 @@ pub fn local_look(cfg: &AppConfig, profile: &str) -> anyhow::Result<LocalLook> {
     let skipped = loadouts.len().saturating_sub(MAX_BIKES);
     loadouts.truncate(MAX_BIKES);
 
-    let plans = bundle::plan_many(cfg, &loadouts.iter().map(|(_, l)| l.clone()).collect::<Vec<_>>());
+    let plans = bundle::plan_many_for_bikes(cfg, &loadouts);
 
     let mut sources = std::collections::HashMap::new();
     let mut oversized = 0usize;
