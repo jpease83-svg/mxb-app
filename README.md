@@ -219,9 +219,10 @@ skips the announcement. It's for testing that a build compiles, not for shipping
 Features coming next:
 
 - **Servers, with paint sync.** Creating and running a dedicated server from the
-  app, and everyone on it seeing everyone else's paint. Both are built and both
-  need an account on the control plane, which is invite-only for now — opening
-  that up is the remaining work.
+  app, and everyone on it seeing everyone else's published paint. Public beta
+  enrollment is open on the AMX deployment. A viewer can run the app alone, but
+  a paint must have been published previously and its underlying custom bike or
+  helmet model must already be installed on the viewer's PC.
 - **A map viewer.** Look at a track before you ride it. The 3D viewer already
   renders bikes and riders straight from the game's own meshes; a track is the
   one thing it doesn't read yet.

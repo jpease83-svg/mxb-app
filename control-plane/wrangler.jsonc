@@ -9,6 +9,13 @@
   // config means a change is a reviewable diff rather than an invisible dashboard edit.
   // The AWS key itself is a secret; see `src/env.d.ts`.
   "vars": {
+    // Open self-enrollment for the public paint-sync beta. The account ceiling below keeps
+    // an accidental or abusive signup burst from becoming an open-ended storage bill.
+    "MXB_PUBLIC_ENROLLMENT": "1",
+    "MXB_PUBLIC_ACCOUNT_LIMIT": "250",
+    // Solo viewers fetch recently published riders without requiring a live heartbeat from
+    // every paint owner. Keep that catalog bounded so a first sync stays predictable.
+    "MXB_CATALOG_MAX_RIDERS": "50",
     // The hard ceiling on concurrent servers. This, and the idle reaper below, are what
     // keep an hourly-billed resource from turning into an open-ended bill.
     "MXB_MAX_INSTANCES": "0",

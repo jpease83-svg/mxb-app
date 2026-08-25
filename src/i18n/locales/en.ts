@@ -751,7 +751,7 @@ export const en = {
   "sync.title": "Paint sync",
   "sync.desc":
     "MX Bikes never sends paints, so other riders show up in default liveries unless you already have their exact file. Publish yours and pull back everyone else's.",
-  "sync.enroll": "Enroll",
+  "sync.enroll": "Join public beta",
   "sync.enrolled": "Enrolled as {{name}}",
   "sync.enrollFailed": "Couldn't enroll",
   "sync.codePlaceholder": "Invite code",
@@ -778,7 +778,7 @@ export const en = {
     "Your GUID is picked up on its own the first time one of your servers sees you connect. Until then your rider name identifies you.",
   "sync.guidManual": "Enter it manually",
   "sync.whereCode":
-    "Paint sync is invite-only for now. Codes are handed out in the Discord — ask there and paste the one you're given above.",
+    "No invite is needed. This PC will publish your look and automatically fetch paints that other riders have already published.",
   "sync.getCode": "Ask in the Discord",
   "sync.sidebarOk": "Synced · {{count}} riders",
   "sync.sidebarUnpublished": "Your look isn't published",

@@ -801,7 +801,7 @@ export const de: Translation = {
     "Deine GUID wird von selbst übernommen, sobald einer deiner Server dich zum ersten Mal verbinden sieht. Bis dahin identifiziert dich dein Fahrername.",
   "sync.guidManual": "Manuell eingeben",
   "sync.whereCode":
-    "Paint-Sync läuft vorerst nur auf Einladung. Codes werden im Discord vergeben — frag dort nach und füge den erhaltenen Code oben ein.",
+    "Keine Einladung nötig. Dieser PC veröffentlicht dein Aussehen und lädt automatisch bereits veröffentlichte Lackierungen anderer Fahrer herunter.",
   "sync.getCode": "Im Discord fragen",
   "sync.sidebarOk": "Synchron · {{count}} Fahrer",
   "sync.sidebarUnpublished": "Dein Look ist nicht veröffentlicht",
