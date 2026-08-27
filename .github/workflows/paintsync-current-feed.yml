@@ -1,0 +1,80 @@
+name: Publish Current Paint Sync Tester Feed
+
+on:
+  push:
+    branches:
+      - feature/paintsync-session-bridge
+    paths:
+      - ".github/workflows/paintsync-current-feed.yml"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download the verified Windows tester artifact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifact dist
+          gh run download 33016726534 \
+            --repo "$GITHUB_REPOSITORY" \
+            --name mxb-app-paintsync-windows-test \
+            --dir artifact
+
+          installer="$(find artifact -type f -name '*setup.exe' -print -quit)"
+          if [ -z "$installer" ]; then
+            echo 'No setup.exe found in verified tester artifact.' >&2
+            find artifact -type f -maxdepth 8 -print
+            exit 1
+          fi
+          cp "$installer" dist/MXB-App-Paint-Sync-Test-0.10.0-x64-setup.exe
+          ls -lh dist/
+
+      - name: Write current-version Tauri compatibility feed
+        shell: bash
+        run: |
+          cat > dist/latest.json <<'JSON'
+          {
+            "version": "0.10.0",
+            "notes": "MXB App Paint Sync Test 0.10.0. This feed marks the currently installed tester as current. Future tester installers use the dedicated Peasey paint-sync channel.",
+            "pub_date": "2026-08-26T22:00:29Z",
+            "platforms": {
+              "windows-x86_64": {
+                "signature": "current-version-feed-no-install",
+                "url": "https://github.com/jpease83-svg/mxb-app/releases/download/v0.10.0-paintsync-test/MXB-App-Paint-Sync-Test-0.10.0-x64-setup.exe"
+              }
+            }
+          }
+          JSON
+          python -m json.tool dist/latest.json
+
+      - name: Publish or refresh tester release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag='v0.10.0-paintsync-test'
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag" dist/latest.json dist/MXB-App-Paint-Sync-Test-0.10.0-x64-setup.exe \
+              --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --latest
+          else
+            gh release create "$tag" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title 'MXB App Paint Sync Test 0.10.0' \
+              --notes 'Peasey paint-sync tester channel. This release provides the current tester installer and a compatibility latest.json feed. The existing 0.10.0 test build will report itself as current; automatic installation of future builds remains disabled until the tester channel has its own Tauri signing key.' \
+              --latest \
+              dist/latest.json dist/MXB-App-Paint-Sync-Test-0.10.0-x64-setup.exe
+          fi
