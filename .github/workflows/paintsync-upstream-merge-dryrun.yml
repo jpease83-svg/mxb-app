@@ -1,0 +1,61 @@
+name: Audit Frost Upstream Merge
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/paintsync-session-bridge
+    paths:
+      - .github/workflows/paintsync-upstream-merge-dryrun.yml
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout paint-sync branch with history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch Frost upstream
+        run: |
+          git remote add upstream https://github.com/Frostn1/mxb-app.git || true
+          git fetch upstream main --tags
+          echo "Current paint-sync head: $(git rev-parse HEAD)"
+          echo "Frost upstream head:     $(git rev-parse upstream/main)"
+          echo "Merge base:              $(git merge-base HEAD upstream/main)"
+
+      - name: Dry-run merge and report conflicts
+        shell: bash
+        run: |
+          set +e
+          git config user.name "paint-sync merge audit"
+          git config user.email "actions@users.noreply.github.com"
+          git merge --no-commit --no-ff upstream/main
+          rc=$?
+
+          echo ""
+          echo "===== MERGE RESULT ====="
+          if [ "$rc" -eq 0 ]; then
+            echo "CLEAN_MERGE=true"
+            echo "No conflicts. Upstream 0.11.1 can merge cleanly."
+          else
+            echo "CLEAN_MERGE=false"
+            echo "Conflict files:"
+            git diff --name-only --diff-filter=U | tee /tmp/conflicts.txt
+            echo ""
+            echo "Conflict count: $(wc -l < /tmp/conflicts.txt)"
+            echo ""
+            echo "===== CONFLICT MARKERS ====="
+            while IFS= read -r f; do
+              [ -z "$f" ] && continue
+              echo "--- $f ---"
+              git diff --cc -- "$f" | sed -n '1,260p'
+            done < /tmp/conflicts.txt
+          fi
+
+          git merge --abort >/dev/null 2>&1 || true
+          exit 0
