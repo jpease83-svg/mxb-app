@@ -19,6 +19,8 @@ import type {
   FrostmodInstallReport,
   FrostmodReload,
   FrostmodStatus,
+  IntegrityReport,
+  RiderIntegrity,
   RuntimeInstallOutcome,
   RuntimeRepairReport,
   VcRuntime,
@@ -2177,6 +2179,45 @@ export function setWatchModsReload(enabled: boolean): Promise<void> {
   return invoke<void>("set_watch_mods_reload", { enabled });
 }
 
+/**
+ * The current cheat-scan verdict, without waiting for the next pass.
+ *
+ * Returns `unknown` before the first scan of a session — which is the honest answer, not an
+ * error to hide.
+ */
+export function integrityStatus(): Promise<IntegrityReport> {
+  return invoke<IntegrityReport>("integrity_status");
+}
+
+/** Scan now rather than at the next pass, refreshing the rule list first. */
+export function integrityScanNow(): Promise<IntegrityReport> {
+  return invoke<IntegrityReport>("integrity_scan_now");
+}
+
+/** Toggle watching the running game for an attached cheat. */
+export function setIntegrityWatch(enabled: boolean): Promise<void> {
+  return invoke<void>("set_integrity_watch", { enabled });
+}
+
+/** Toggle publishing this client's verdict to the servers it joins. */
+export function setIntegrityReport(enabled: boolean): Promise<void> {
+  return invoke<void>("set_integrity_report", { enabled });
+}
+
+/** What the riders on one server have attested. Server owners and riders on it only. */
+export function integrityServerReports(serverId: string): Promise<RiderIntegrity[]> {
+  return invoke<RiderIntegrity[]>("integrity_server_reports", { serverId });
+}
+
+/** Fires when the verdict *changes* — a settled session is silent rather than pushing an
+ *  identical report every 45 seconds. */
+export function onIntegrityReport(
+  cb: (report: IntegrityReport) => void,
+): Promise<UnlistenFn> {
+  return listen<IntegrityReport>("integrity-report", (e) => cb(e.payload));
+}
+
+/** Sentinel slug the backend tags folder-watch reloads with (vs in-app installs). */
 export const MODS_WATCH_SLUG = "__mods_watch__";
 
 /** Fires after each install with whether FrostMod picked the new mod up live. */
