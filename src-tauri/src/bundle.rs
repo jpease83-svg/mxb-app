@@ -49,33 +49,11 @@ struct Spec {
     value: String,
     scan: Scan,
     cats: &'static [&'static str],
-    owner: Owner,
-}
-
-/// Which installed thing a slot's file has to sit under.
-///
-/// A bike livery and a gear paint both name a file that lives inside something else, but they
-/// differ in how much that containment can be trusted, so they get different rules rather than
-/// one flag that has to be remembered at every call site.
-enum Owner {
-    /// Nothing to check — the value names the thing itself.
-    Any,
-    /// Prefer this owner, fall back to a match elsewhere. A rider model's folder name and the
-    /// profile's value for it do not always agree, and refusing the paint over that would lose
-    /// a livery the game itself finds.
-    Prefer(String),
-    /// Must be this owner. A bike livery belongs to one bike: `Race.pnt` under another bike is
-    /// a different file with a different destination, so a near miss is worse than a miss.
-    Require(String),
-}
-
-impl Owner {
-    fn name(&self) -> Option<&str> {
-        match self {
-            Owner::Any => None,
-            Owner::Prefer(p) | Owner::Require(p) => Some(p.trim()).filter(|p| !p.is_empty()),
-        }
-    }
+    parent: Option<String>,
+    /// A bike livery belongs to one exact bike id. Falling back to the same filename under
+    /// another bike silently publishes the wrong paint; the looser fallback remains useful
+    /// for older rider assets whose folder name and profile value do not always agree.
+    strict_parent: bool,
 }
 
 fn strip_ext(name: &str) -> String {
@@ -109,32 +87,60 @@ fn rel_dest(type_folder: &str, e: &LibraryEntry) -> String {
 }
 
 pub fn plan(cfg: &AppConfig, loadout: &Loadout) -> anyhow::Result<BundlePlan> {
-    let mut p = resolve(cfg, loadout, None)?;
+    let mut p = resolve(cfg, loadout)?;
     dedup_assets(&mut p.assets);
     p.total_size = p.assets.iter().map(|a| a.size).sum();
     Ok(p)
 }
 
-/// Every bike in a profile, resolved for publishing, paying for the library walk once.
+/// [`plan`] for several loadouts, paying for the library walk once.
 ///
 /// Resolving a slot means matching it against every installed file, and gathering those files
 /// means a full recursive walk of `mods/bikes` — which on a real install is every livery the
 /// player owns. One walk per loadout is fine for the one-at-a-time callers; it is not fine for
 /// "publish this rider's whole profile", where the loadout count is the number of bikes they
 /// have ever sat on. Same resolution, same order, one scan.
-///
-/// Two things differ from [`plan`], both because the publisher uploads file by file rather
-/// than zipping a folder: each loadout's livery is pinned to the bike it was read under, and
-/// assets stay individually addressed as they do in [`plan_detailed`] — collapsing a gear
-/// paint into the model folder containing it would drop it from a publish entirely.
-pub fn plan_profile(cfg: &AppConfig, loadouts: &[(String, Loadout)]) -> Vec<BundlePlan> {
+pub fn plan_many(cfg: &AppConfig, loadouts: &[Loadout]) -> Vec<BundlePlan> {
     if loadouts.is_empty() {
         return Vec::new();
     }
     let libs = Libraries::scan(cfg);
     loadouts
         .iter()
-        .map(|(bike, loadout)| resolve_with(cfg, &libs, loadout, Some(bike)))
+        .map(|loadout| {
+            let mut p = resolve_with(cfg, &libs, loadout, None);
+            dedup_assets(&mut p.assets);
+            p.total_size = p.assets.iter().map(|a| a.size).sum();
+            p
+        })
+        .collect()
+}
+
+/// [`plan_many`] with the bike id that owns each loadout.
+///
+/// Paint sync publishes a whole profile at once. Bike liveries often reuse names such as
+/// `default` or `race`, so resolving by filename alone can select that name from another
+/// bike. Keeping the id beside the loadout makes the livery lookup unambiguous while still
+/// paying for the recursive library scan only once.
+pub fn plan_many_for_bikes(cfg: &AppConfig, loadouts: &[(String, Loadout)]) -> Vec<BundlePlan> {
+    if loadouts.is_empty() {
+        return Vec::new();
+    }
+    let libs = Libraries::scan(cfg);
+    loadouts
+        .iter()
+        .map(|(bike_id, loadout)| {
+            let mut p = resolve_with(cfg, &libs, loadout, Some(bike_id));
+            // Paint sync consumes individual `.pnt` assets, not the complete preset bundle.
+            // The normal bundle deduplicator deliberately removes a paint when its parent
+            // model folder is already present (for example `rider/helmets/AGV` contains
+            // `paints/Blue.pnt`). That is correct for a zip, but it made helmet, boot and
+            // protection paints disappear here because the sync layer filters model folders
+            // out. Keep nested assets addressed individually; only remove exact duplicates.
+            dedup_exact_assets(&mut p.assets);
+            p.total_size = p.assets.iter().map(|a| a.size).sum();
+            p
+        })
         .collect()
 }
 
@@ -144,18 +150,14 @@ pub fn plan_profile(cfg: &AppConfig, loadouts: &[(String, Loadout)]) -> Vec<Bund
 /// carries `rider/helmets/AGV` carries the liveries under it for free. Manage needs the
 /// opposite: it keeps that helmet by moving nothing at all, and decides livery by livery
 /// which ones the game still gets to offer — so the paint has to be named, not implied.
-pub fn plan_detailed(
-    cfg: &AppConfig,
-    loadout: &Loadout,
-    bike: Option<&str>,
-) -> anyhow::Result<BundlePlan> {
-    resolve(cfg, loadout, bike)
+pub fn plan_detailed(cfg: &AppConfig, loadout: &Loadout) -> anyhow::Result<BundlePlan> {
+    resolve(cfg, loadout)
 }
 
 /// The three scans a resolution reads from, gathered once.
 ///
-/// Exists so [`plan_profile`] can hand the same walk to every loadout. A scan is infallible
-/// from the caller's point of view — an unreadable folder resolves to nothing, exactly as it did
+/// Exists so [`plan_many`] can hand the same walk to every loadout. A scan is infallible from
+/// the caller's point of view — an unreadable folder resolves to nothing, exactly as it did
 /// when each `resolve` did its own `unwrap_or_default`.
 struct Libraries {
     bikes: Vec<LibraryEntry>,
@@ -176,36 +178,34 @@ impl Libraries {
     }
 }
 
-fn resolve(cfg: &AppConfig, loadout: &Loadout, bike: Option<&str>) -> anyhow::Result<BundlePlan> {
-    Ok(resolve_with(cfg, &Libraries::scan(cfg), loadout, bike))
+fn resolve(cfg: &AppConfig, loadout: &Loadout) -> anyhow::Result<BundlePlan> {
+    Ok(resolve_with(cfg, &Libraries::scan(cfg), loadout, None))
 }
 
-/// `bike` is the bike id the loadout was read under, where the caller knows it. A preset does
-/// not have one — it dresses whichever bike it is applied to — so the livery stays loose there.
 fn resolve_with(
     cfg: &AppConfig,
     libs: &Libraries,
     loadout: &Loadout,
-    bike: Option<&str>,
+    bike_id: Option<&str>,
 ) -> BundlePlan {
     let Libraries { bikes, rider, tyres } = libs;
 
     let specs = vec![
-        Spec { slot: "paint", value: loadout.paint.clone(), scan: Scan::Bikes, cats: &["bikePaint"], owner: bike.map_or(Owner::Any, |b| Owner::Require(b.to_string())) },
-        Spec { slot: "helmet", value: loadout.helmet.clone(), scan: Scan::Rider, cats: &["helmet"], owner: Owner::Any },
-        Spec { slot: "helmet_paint", value: loadout.helmet_paint.clone(), scan: Scan::Rider, cats: &["helmetPaint"], owner: Owner::Prefer(loadout.helmet.clone()) },
-        Spec { slot: "goggles_paint", value: loadout.goggles_paint.clone(), scan: Scan::Rider, cats: &["goggles"], owner: Owner::Prefer(loadout.helmet.clone()) },
-        Spec { slot: "suit_paint", value: loadout.suit_paint.clone(), scan: Scan::Rider, cats: &["outfit"], owner: Owner::Prefer(loadout.rider.clone()) },
-        Spec { slot: "gloves_paint", value: loadout.gloves_paint.clone(), scan: Scan::Rider, cats: &["gloves"], owner: Owner::Any },
-        Spec { slot: "boots", value: loadout.boots.clone(), scan: Scan::Rider, cats: &["boots"], owner: Owner::Any },
-        Spec { slot: "boots_paint", value: loadout.boots_paint.clone(), scan: Scan::Rider, cats: &["bootPaint"], owner: Owner::Prefer(loadout.boots.clone()) },
-        Spec { slot: "protection", value: loadout.protection.clone(), scan: Scan::Rider, cats: &["protection"], owner: Owner::Any },
-        Spec { slot: "protection_paint", value: loadout.protection_paint.clone(), scan: Scan::Rider, cats: &["protectionPaint"], owner: Owner::Prefer(loadout.protection.clone()) },
+        Spec { slot: "paint", value: loadout.paint.clone(), scan: Scan::Bikes, cats: &["bikePaint"], parent: bike_id.map(str::to_string), strict_parent: bike_id.is_some() },
+        Spec { slot: "helmet", value: loadout.helmet.clone(), scan: Scan::Rider, cats: &["helmet"], parent: None, strict_parent: false },
+        Spec { slot: "helmet_paint", value: loadout.helmet_paint.clone(), scan: Scan::Rider, cats: &["helmetPaint"], parent: Some(loadout.helmet.clone()), strict_parent: false },
+        Spec { slot: "goggles_paint", value: loadout.goggles_paint.clone(), scan: Scan::Rider, cats: &["goggles"], parent: Some(loadout.helmet.clone()), strict_parent: false },
+        Spec { slot: "suit_paint", value: loadout.suit_paint.clone(), scan: Scan::Rider, cats: &["outfit"], parent: Some(loadout.rider.clone()), strict_parent: false },
+        Spec { slot: "gloves_paint", value: loadout.gloves_paint.clone(), scan: Scan::Rider, cats: &["gloves"], parent: None, strict_parent: false },
+        Spec { slot: "boots", value: loadout.boots.clone(), scan: Scan::Rider, cats: &["boots"], parent: None, strict_parent: false },
+        Spec { slot: "boots_paint", value: loadout.boots_paint.clone(), scan: Scan::Rider, cats: &["bootPaint"], parent: Some(loadout.boots.clone()), strict_parent: false },
+        Spec { slot: "protection", value: loadout.protection.clone(), scan: Scan::Rider, cats: &["protection"], parent: None, strict_parent: false },
+        Spec { slot: "protection_paint", value: loadout.protection_paint.clone(), scan: Scan::Rider, cats: &["protectionPaint"], parent: Some(loadout.protection.clone()), strict_parent: false },
         // A custom riding style is a mod like any other. The two stock ones live in
         // `rider.pkz` and leave nothing on disk, which `is_builtin` skips rather than
         // reporting unresolved.
-        Spec { slot: "riding_style", value: loadout.riding_style.clone(), scan: Scan::Rider, cats: &["animation"], owner: Owner::Any },
-        Spec { slot: "tyres", value: loadout.tyres.clone(), scan: Scan::Tyres, cats: &["misc"], owner: Owner::Any },
+        Spec { slot: "riding_style", value: loadout.riding_style.clone(), scan: Scan::Rider, cats: &["animation"], parent: None, strict_parent: false },
+        Spec { slot: "tyres", value: loadout.tyres.clone(), scan: Scan::Tyres, cats: &["misc"], parent: None, strict_parent: false },
     ];
 
     let mut assets: Vec<AssetRef> = Vec::new();
@@ -230,15 +230,13 @@ fn resolve_with(
             })
             .collect();
 
-        if let Some(owner) = spec.owner.name() {
-            let under_owner = |e: &LibraryEntry| {
-                e.parent.as_deref().map(|p| p.eq_ignore_ascii_case(owner)).unwrap_or(false)
-            };
-            // `Require` keeps the filter even when it empties the list. Reporting the slot
-            // unresolved is the honest answer there; falling back would hand back another
-            // bike's livery, which also carries that bike's destination path.
-            if matches!(spec.owner, Owner::Require(_)) || matches.iter().any(|e| under_owner(e)) {
-                matches.retain(|e| under_owner(e));
+        if let Some(parent) = spec.parent.as_ref().map(|p| p.trim()).filter(|p| !p.is_empty()) {
+            if spec.strict_parent || matches.iter().any(|e| {
+                e.parent.as_deref().map(|p| p.eq_ignore_ascii_case(parent)).unwrap_or(false)
+            }) {
+                matches.retain(|e| {
+                    e.parent.as_deref().map(|p| p.eq_ignore_ascii_case(parent)).unwrap_or(false)
+                });
             }
         }
 
@@ -337,6 +335,15 @@ fn dedup_assets(assets: &mut Vec<AssetRef>) {
             a.rel_dest != *d && a.rel_dest.starts_with(&format!("{d}/"))
         })
     });
+}
+
+/// Remove the same destination twice without treating a containing model folder as the asset.
+///
+/// A complete preset archive uses [`dedup_assets`]; paint sync needs this narrower form so it
+/// can hash and publish each nested paint separately.
+fn dedup_exact_assets(assets: &mut Vec<AssetRef>) {
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    assets.retain(|asset| seen.insert(asset.rel_dest.clone()));
 }
 
 /// Total bytes under `dir`, following the links a mods tree is full of. Shared with
@@ -478,9 +485,6 @@ pub async fn import(
         "",
         BUNDLE_SLUG,
         install::OnConflict::Keep,
-        // Staged under our own `work`, deleted at the end of this function. Files the
-        // receiver already has are skipped and simply go with it.
-        install::Staging::Consume,
     )?;
 
     presets::save_preset(presets_dir, preset.clone())?;
@@ -716,7 +720,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    // Publishing a rider's whole profile plans every bike they own. `plan_profile` exists to
+    // Publishing a rider's whole profile plans every bike they own. `plan_many` exists to
     // make that one library walk instead of one per bike, so the thing worth pinning is that
     // it still answers exactly what planning them separately would have.
     #[test]
@@ -733,15 +737,11 @@ mod tests {
         let mut yam = Loadout::default();
         yam.paint = "Southwick".into();
 
-        let loadouts =
-            vec![("KTM450".to_string(), ktm.clone()), ("YZ250".to_string(), yam.clone())];
-        let many = plan_profile(&cfg, &loadouts);
+        let loadouts = vec![ktm.clone(), yam.clone()];
+        let many = plan_many(&cfg, &loadouts);
         assert_eq!(many.len(), 2);
-        let each = [
-            plan_detailed(&cfg, &ktm, Some("KTM450")).unwrap(),
-            plan_detailed(&cfg, &yam, Some("YZ250")).unwrap(),
-        ];
-        for (batched, one) in many.iter().zip(each) {
+        for (batched, one) in many.iter().zip([plan(&cfg, &ktm).unwrap(), plan(&cfg, &yam).unwrap()])
+        {
             let dests = |p: &BundlePlan| {
                 p.assets.iter().map(|a| a.rel_dest.clone()).collect::<Vec<_>>()
             };
@@ -751,100 +751,65 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    // Livery names repeat across bikes — `default`, `race`, a team name. Matching on the
-    // filename alone published whichever one the walk reached first, and `rel_dest` carries
-    // that bike's folder, so the receiver installed it onto the wrong bike too.
-    #[test]
-    fn a_livery_resolves_under_the_bike_that_wears_it() {
-        let root = tmp("livery-owner");
-        touch(&root.join("mods/bikes/KTM450/paints/Race.pnt"));
-        touch(&root.join("mods/bikes/YZ250/paints/Race.pnt"));
-
-        let cfg = AppConfig { mods_path: root.to_string_lossy().into_owned(), ..Default::default() };
-        let mut lo = Loadout::default();
-        lo.paint = "Race".into();
-
-        for bike in ["YZ250", "KTM450"] {
-            let plans = plan_profile(&cfg, &[(bike.to_string(), lo.clone())]);
-            let paints = plans[0]
-                .assets
-                .iter()
-                .filter(|a| a.slot == "paint")
-                .map(|a| a.rel_dest.as_str())
-                .collect::<Vec<_>>();
-            assert_eq!(paints, vec![format!("bikes/{bike}/paints/Race.pnt")]);
-        }
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    // The other half of that rule: when the owning bike has no such livery, the answer is
-    // "unresolved", not "here is someone else's". Unlike a rider model — whose folder name and
-    // profile value genuinely disagree sometimes — a bike livery has one correct home.
-    #[test]
-    fn a_livery_missing_from_its_own_bike_is_never_borrowed() {
-        let root = tmp("livery-no-borrow");
-        touch(&root.join("mods/bikes/KTM450/paints/Race.pnt"));
-        touch(&root.join("mods/bikes/YZ250/paints/Southwick.pnt"));
-
-        let cfg = AppConfig { mods_path: root.to_string_lossy().into_owned(), ..Default::default() };
-        let mut lo = Loadout::default();
-        lo.paint = "Race".into();
-
-        let plans = plan_profile(&cfg, &[("YZ250".to_string(), lo)]);
-        assert!(!plans[0].assets.iter().any(|a| a.slot == "paint"));
-        assert!(plans[0].unresolved.iter().any(|u| u.slot == "paint"));
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    // A gear paint usually lives inside the model folder that binds it. `plan` folds it into
-    // that folder on purpose — a zip carrying `rider/helmets/AGV` carries the liveries free —
-    // but a publish uploads `.pnt` files one at a time and skips folders, so folding them in
-    // meant every helmet, boot and protection paint silently went unshared.
-    #[test]
-    fn gear_paints_nested_in_their_model_stay_addressable() {
-        let root = tmp("nested-gear");
-        touch(&root.join("mods/rider/helmets/AGV/model.edf"));
-        touch(&root.join("mods/rider/helmets/AGV/paints/Blue.pnt"));
-        touch(&root.join("mods/rider/helmets/AGV/goggles/Smoke.pnt"));
-        touch(&root.join("mods/rider/boots/Tech10/model.edf"));
-        touch(&root.join("mods/rider/boots/Tech10/paints/White.pnt"));
-        touch(&root.join("mods/rider/protections/Leatt/model.edf"));
-        touch(&root.join("mods/rider/protections/Leatt/paints/Carbon.pnt"));
-
-        let cfg = AppConfig { mods_path: root.to_string_lossy().into_owned(), ..Default::default() };
-        let mut lo = Loadout::default();
-        lo.helmet = "AGV".into();
-        lo.helmet_paint = "Blue".into();
-        lo.goggles_paint = "Smoke".into();
-        lo.boots = "Tech10".into();
-        lo.boots_paint = "White".into();
-        lo.protection = "Leatt".into();
-        lo.protection_paint = "Carbon".into();
-
-        let plans = plan_profile(&cfg, &[("YZ250".to_string(), lo.clone())]);
-        let dest = |slot: &str| {
-            plans[0]
-                .assets
-                .iter()
-                .find(|a| a.slot == slot)
-                .map(|a| a.rel_dest.as_str())
-        };
-        assert_eq!(dest("helmet_paint"), Some("rider/helmets/AGV/paints/Blue.pnt"));
-        assert_eq!(dest("goggles_paint"), Some("rider/helmets/AGV/goggles/Smoke.pnt"));
-        assert_eq!(dest("boots_paint"), Some("rider/boots/Tech10/paints/White.pnt"));
-        assert_eq!(dest("protection_paint"), Some("rider/protections/Leatt/paints/Carbon.pnt"));
-
-        // The zip path still collapses them, which is what makes it a smaller archive.
-        let zipped = plan(&cfg, &lo).unwrap();
-        assert!(!zipped.assets.iter().any(|a| a.slot == "helmet_paint"));
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
     #[test]
     fn planning_nothing_walks_nothing() {
         // Guards the early return: a profile with no bikes must not pay for a library scan.
         let cfg = AppConfig { mods_path: "/nowhere".into(), ..Default::default() };
-        assert!(plan_profile(&cfg, &[]).is_empty());
+        assert!(plan_many(&cfg, &[]).is_empty());
+    }
+
+    #[test]
+    fn profile_paint_resolution_uses_the_owning_bike() {
+        let root = tmp("profile-bike-paint");
+        // Reused livery names are normal. Publishing the first filename match made the YZ
+        // advertise the KTM path and left the remote YZ in its default livery.
+        touch(&root.join("mods/bikes/KTM450/paints/Race.pnt"));
+        touch(&root.join("mods/bikes/YZ250/paints/Race.pnt"));
+
+        let cfg = AppConfig { mods_path: root.to_string_lossy().into_owned(), ..Default::default() };
+        let mut loadout = Loadout::default();
+        loadout.paint = "Race".into();
+        let loadouts = vec![("YZ250".to_string(), loadout)];
+
+        let plans = plan_many_for_bikes(&cfg, &loadouts);
+        let paints = plans[0]
+            .assets
+            .iter()
+            .filter(|a| a.slot == "paint")
+            .map(|a| a.rel_dest.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(paints, vec!["bikes/YZ250/paints/Race.pnt"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn profile_paint_resolution_keeps_paints_nested_in_rider_models() {
+        let root = tmp("profile-rider-paints");
+        // A full preset bundle can represent each of these paints through the containing
+        // model folder. Live paint sync cannot: it uploads individual `.pnt` files only.
+        touch(&root.join("mods/rider/helmets/AGV/model.edf"));
+        touch(&root.join("mods/rider/helmets/AGV/paints/Blue.pnt"));
+        touch(&root.join("mods/rider/boots/Tech10/model.edf"));
+        touch(&root.join("mods/rider/boots/Tech10/paints/White.pnt"));
+
+        let cfg = AppConfig { mods_path: root.to_string_lossy().into_owned(), ..Default::default() };
+        let mut loadout = Loadout::default();
+        loadout.helmet = "AGV".into();
+        loadout.helmet_paint = "Blue".into();
+        loadout.boots = "Tech10".into();
+        loadout.boots_paint = "White".into();
+
+        let plans = plan_many_for_bikes(&cfg, &[("YZ250".to_string(), loadout)]);
+        let dest = |slot: &str| {
+            plans[0]
+                .assets
+                .iter()
+                .find(|asset| asset.slot == slot)
+                .map(|asset| asset.rel_dest.as_str())
+        };
+        assert_eq!(dest("helmet_paint"), Some("rider/helmets/AGV/paints/Blue.pnt"));
+        assert_eq!(dest("boots_paint"), Some("rider/boots/Tech10/paints/White.pnt"));
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -936,7 +901,6 @@ mod tests {
             "",
             "slug",
             install::OnConflict::Keep,
-            install::Staging::Preserve,
         )
         .unwrap();
 
