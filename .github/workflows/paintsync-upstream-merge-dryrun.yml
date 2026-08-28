@@ -34,6 +34,7 @@ jobs:
           set +e
           git config user.name "paint-sync merge audit"
           git config user.email "actions@users.noreply.github.com"
+          git config merge.conflictstyle diff3
           git merge --no-commit --no-ff upstream/main
           rc=$?
 
@@ -41,19 +42,23 @@ jobs:
           echo "===== MERGE RESULT ====="
           if [ "$rc" -eq 0 ]; then
             echo "CLEAN_MERGE=true"
-            echo "No conflicts. Upstream 0.11.1 can merge cleanly."
+            echo "No conflicts. Upstream can merge cleanly."
           else
             echo "CLEAN_MERGE=false"
-            echo "Conflict files:"
             git diff --name-only --diff-filter=U | tee /tmp/conflicts.txt
-            echo ""
             echo "Conflict count: $(wc -l < /tmp/conflicts.txt)"
             echo ""
-            echo "===== CONFLICT MARKERS ====="
+            echo "===== CONFLICT BLOCKS ====="
             while IFS= read -r f; do
               [ -z "$f" ] && continue
-              echo "--- $f ---"
-              git diff --cc -- "$f" | sed -n '1,260p'
+              echo ""
+              echo "######## $f ########"
+              awk '
+                /^<<<<<<< / {show=1; before=8; print "..."}
+                show {print}
+                /^>>>>>>> / {after=8; next}
+                after>0 {print; after--; if(after==0){show=0; print "..."}}
+              ' "$f"
             done < /tmp/conflicts.txt
           fi
 
