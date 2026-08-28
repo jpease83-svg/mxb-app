@@ -567,6 +567,9 @@ struct Roster {
     riders: Vec<RosterRider>,
 }
 
+/// A capped catalog of recently published riders, independent of live server presence.
+pub const CATALOG_SCOPE: &str = "catalog";
+
 /// Identity for de-duplication: the GUID where the rider has claimed one, their name
 /// otherwise. The same order of preference the control plane groups by, so the two agree
 /// on what counts as one rider.
@@ -596,9 +599,13 @@ pub async fn pull(cfg: &AppConfig, token: &str, server_ids: &[String]) -> anyhow
     let mut reached = 0usize;
 
     for server_id in server_ids {
-        let roster: Roster = match http
-            .get(format!("{}/v1/roster", control_plane()))
-            .query(&[("server", server_id.as_str())])
+        let request = if server_id == CATALOG_SCOPE {
+            http.get(format!("{}/v1/catalog", control_plane()))
+        } else {
+            http.get(format!("{}/v1/roster", control_plane()))
+                .query(&[("server", server_id.as_str())])
+        };
+        let roster: Roster = match request
             .bearer_auth(token)
             .send()
             .await
@@ -608,7 +615,7 @@ pub async fn pull(cfg: &AppConfig, token: &str, server_ids: &[String]) -> anyhow
             // One unreachable roster shouldn't sink the others — the player still wants the
             // paints for the servers that did answer.
             Err(e) => {
-                log::warn!("[sync] roster for {server_id} failed: {e}");
+                log::warn!("[sync] paint list for {server_id} failed: {e}");
                 continue;
             }
         };

@@ -874,7 +874,7 @@ export const it: Translation = {
     "Il tuo GUID viene rilevato da solo la prima volta che uno dei tuoi server ti vede connetterti. Fino ad allora ti identifica il nome pilota.",
   "sync.guidManual": "Inseriscilo manualmente",
   "sync.whereCode":
-    "Per ora il paint sync è a inviti. I codici vengono distribuiti nel Discord — chiedilo lì e incolla qui sopra quello che ricevi.",
+    "Non serve alcun invito. Questo PC pubblicherà il tuo look e scaricherà automaticamente le livree già pubblicate dagli altri piloti.",
   "sync.getCode": "Chiedi nel Discord",
   "sync.sidebarOk": "Sincronizzato · {{count}} piloti",
   "sync.sidebarUnpublished": "Il tuo look non è pubblicato",
