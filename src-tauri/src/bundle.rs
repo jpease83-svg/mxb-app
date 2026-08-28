@@ -150,8 +150,12 @@ pub fn plan_many_for_bikes(cfg: &AppConfig, loadouts: &[(String, Loadout)]) -> V
 /// carries `rider/helmets/AGV` carries the liveries under it for free. Manage needs the
 /// opposite: it keeps that helmet by moving nothing at all, and decides livery by livery
 /// which ones the game still gets to offer — so the paint has to be named, not implied.
-pub fn plan_detailed(cfg: &AppConfig, loadout: &Loadout) -> anyhow::Result<BundlePlan> {
-    resolve(cfg, loadout)
+pub fn plan_detailed(
+    cfg: &AppConfig,
+    loadout: &Loadout,
+    bike: Option<&str>,
+) -> anyhow::Result<BundlePlan> {
+    Ok(resolve_with(cfg, &Libraries::scan(cfg), loadout, bike))
 }
 
 /// The three scans a resolution reads from, gathered once.
@@ -485,6 +489,9 @@ pub async fn import(
         "",
         BUNDLE_SLUG,
         install::OnConflict::Keep,
+        // Staged under our own `work`, deleted at the end of this function. Files the
+        // receiver already has are skipped and simply go with it.
+        install::Staging::Consume,
     )?;
 
     presets::save_preset(presets_dir, preset.clone())?;
@@ -901,6 +908,7 @@ mod tests {
             "",
             "slug",
             install::OnConflict::Keep,
+            install::Staging::Preserve,
         )
         .unwrap();
 
