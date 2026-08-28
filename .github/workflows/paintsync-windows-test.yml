@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/paintsync-session-bridge
+      - integrate/frost-0.11.1
     paths:
       - "src/**"
       - "src-tauri/**"
