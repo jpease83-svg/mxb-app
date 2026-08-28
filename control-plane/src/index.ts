@@ -1499,16 +1499,6 @@ async function catalog(env: Env): Promise<Response> {
   return paintRoster("catalog", rows.results);
 }
 
-/** Read a column we wrote as JSON. A row that somehow isn't parseable is an empty list, not
- *  a 500 — one bad row must not take out an admin's whole view. */
-function safeParse(text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return [];
-  }
-}
-
 /**
  * A client publishing what its own cheat scan found.
  *
