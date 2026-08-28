@@ -1,9 +1,23 @@
 import { createContext, useContext } from "react";
-import type { FrostmodStatus, ReloadOutcome, VcRuntime } from "../types";
+import type {
+  Attachment,
+  FrostmodStatus,
+  ReloadOutcome,
+  StrayMsvcr90,
+  VcRuntime,
+} from "../types";
 
 export interface FrostmodContextValue {
   /** Whether FrostMod is currently running (polled). `null` until first probe. */
   running: boolean | null;
+  /**
+   * Whether FrostMod's DLL actually made it into the running game (polled alongside
+   * {@link running}). `null` until the first probe.
+   *
+   * Worth having next to `running`, not instead of it: `running` is what the Start/Stop
+   * buttons act on, while this is what says whether any of it is reaching the game.
+   */
+  attachment: Attachment | null;
   /** Install/version snapshot (`null` until first fetched). */
   status: FrostmodStatus | null;
   /** True while an install/update download is in flight. */
@@ -30,8 +44,8 @@ export interface FrostmodContextValue {
   /** True while a full runtime repair is in flight. */
   repairingRuntimes: boolean;
   /**
-   * Install every Visual C++ runtime this PC is short of, then place `msvcr90.dll` beside
-   * the game executable.
+   * Install every Visual C++ runtime this PC is short of, and sweep up a stray
+   * `msvcr90.dll` beside the game executable if an older build of this app left one there.
    *
    * Unlike {@link installRuntime} this isn't gated on anything having been detected as
    * missing, which is the point of it: a PC can report every runtime present and still
@@ -41,6 +55,31 @@ export interface FrostmodContextValue {
    * it couldn't do.
    */
   repairRuntimes: () => Promise<void>;
+  /**
+   * A loose `msvcr90.dll` beside the game exe that the app won't remove on its own —
+   * `"foreign"` (somebody else's file) or `"locked"` (the game is holding ours open).
+   * `null` when there's nothing to report, which is nearly always.
+   *
+   * It outranks {@link runtimeWarning} in the banner: a missing runtime is a thing that
+   * won't work, this is a file actively crashing the game with R6034.
+   */
+  strayMsvcr90: Exclude<StrayMsvcr90, "clear" | "removed"> | null;
+  /**
+   * The same thing the banner should show — `null` once dismissed this session. Paired
+   * with {@link strayMsvcr90} the way {@link runtimeWarning} is with
+   * {@link missingRuntime}: Settings keeps explaining what a dismissed bar stopped saying.
+   */
+  strayWarning: Exclude<StrayMsvcr90, "clear" | "removed"> | null;
+  /** True while the stray file is being moved aside. */
+  clearingStray: boolean;
+  /**
+   * Rename the stray `msvcr90.dll` to `msvcr90.dll.disabled`, on the player's say-so.
+   *
+   * The consenting counterpart to {@link repairRuntimes}, which only ever deletes a copy
+   * this app made. Never throws — a failure (the game holding the file) comes back as a
+   * toast telling them what to do about it.
+   */
+  clearStrayMsvcr90: () => Promise<void>;
   /** Hide the runtime banner for this session (the Settings panel keeps showing it). */
   dismissRuntimeWarning: () => void;
   /** What the banner should warn about — `null` once dismissed this session. */

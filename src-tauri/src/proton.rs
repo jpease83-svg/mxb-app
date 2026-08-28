@@ -331,8 +331,8 @@ pub fn kill_exe(exe: &str) {
 /// Every PE file mapped into `pid`, by path.
 ///
 /// Wine loads a DLL by mapping the file itself, so the kernel's own mapping list is a
-/// faithful account of what is inside the game — which is what makes cheat detection
-/// possible at all on a platform with no `CreateToolhelp32Snapshot`.
+/// faithful account of what is inside the game on a platform with no
+/// `CreateToolhelp32Snapshot`.
 pub fn mapped_pe_files(pid: u32) -> Vec<String> {
     std::fs::read_to_string(format!("/proc/{pid}/maps"))
         .map(|maps| pe_files_in_maps(&maps))
@@ -342,7 +342,7 @@ pub fn mapped_pe_files(pid: u32) -> Vec<String> {
 /// Every process on the machine, by executable name — the Linux half of
 /// [`crate::gameproc::running_process_names`].
 ///
-/// `comm` rather than `cmdline`: it is the short name, which is what the rule list matches,
+/// `comm` rather than `cmdline`: it is the short name, and it is
 /// and it is there for kernel threads and short-lived processes whose `cmdline` is empty.
 pub fn process_names() -> Vec<String> {
     let mut names = Vec::new();
@@ -376,8 +376,8 @@ pub fn process_names() -> Vec<String> {
 ///     mapped several times over as the loader lays out its sections, so the answer is a
 ///     de-duplicated set;
 ///   - a file replaced while mapped keeps its old mapping with a ` (deleted)` marker glued
-///     to the path. Stripping it matters: a cheat that unlinks itself after loading is
-///     exactly the case we want to still name.
+///     to the path. Stripping it matters so a file replaced while mapped is still named by
+///     its real path.
 fn pe_files_in_maps(maps: &str) -> Vec<String> {
     let mut files: Vec<String> = maps
         .lines()
@@ -477,7 +477,7 @@ mod tests {
 
     /// The mapping list is how Linux answers "what is loaded into the game". Spaces in the
     /// path, repeated section mappings and anonymous regions all have to come out right, or
-    /// the scanner either misses a DLL or invents one.
+    /// the parse either misses a DLL or invents one.
     #[test]
     fn a_mapping_list_yields_each_mapped_pe_once() {
         let maps = "\
@@ -485,7 +485,7 @@ mod tests {
 00452000-00453000 r--p 00052000 08:02 173521     /home/rider/.steam/steamapps/common/MX Bikes/mxbikes.exe
 7f0000000000-7f0000021000 rw-p 00000000 00:00 0
 7f1111111000-7f1111120000 r-xp 00000000 08:02 99 /usr/lib/wine/x86_64-windows/kernel32.dll
-7f2222222000-7f2222230000 r-xp 00000000 08:02 42 /home/rider/Downloads/kaizo hack.dll (deleted)
+7f2222222000-7f2222230000 r-xp 00000000 08:02 42 /home/rider/Downloads/extra_mod.dll (deleted)
 7f3333333000-7f3333340000 r-xp 00000000 08:02 43 /usr/lib/x86_64-linux-gnu/libc.so.6
 00e2f000-00e50000 rw-p 00000000 00:00 0          [heap]
 ";
@@ -493,7 +493,7 @@ mod tests {
             pe_files_in_maps(maps),
             [
                 "/home/rider/.steam/steamapps/common/MX Bikes/mxbikes.exe",
-                "/home/rider/Downloads/kaizo hack.dll",
+                "/home/rider/Downloads/extra_mod.dll",
                 "/usr/lib/wine/x86_64-windows/kernel32.dll",
             ]
         );

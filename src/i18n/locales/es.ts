@@ -50,6 +50,7 @@ export const es: Translation = {
   "nav.locker": "Taquilla",
   "nav.presets": "Presets",
   "nav.rider": "Piloto",
+  "nav.pose": "Postura",
   "nav.designer": "Designer",
   "nav.paints": "Pinturas",
   "nav.studio": "Studio",
@@ -58,6 +59,7 @@ export const es: Translation = {
   "nav.settings": "Ajustes",
 
   "sidebar.installing": "Instalando «{{name}}»",
+  "sidebar.installingCount": "Instalando {{count}} mods",
   "sidebar.queued": "+{{count}} en cola",
   "sidebar.expand": "Expandir la barra lateral",
   "sidebar.collapse": "Contraer la barra lateral",
@@ -68,6 +70,7 @@ export const es: Translation = {
   "frostmod.checking": "Comprobando FrostMod…",
   "frostmod.running": "FrostMod activo",
   "frostmod.notRunning": "FrostMod inactivo",
+  "frostmod.notInGame": "FrostMod no está en el juego",
   "frostmod.reloadGame": "Recargar el juego",
   "frostmod.start": "Iniciar FrostMod",
   "frostmod.reloadedGame": "FrostMod recargó el juego.",
@@ -131,6 +134,13 @@ export const es: Translation = {
   "presets.help":
     "Guarda un look completo de piloto y cárgalo en una moto cuando quieras.",
   "presets.profile": "Perfil",
+  "presets.forgetBike": "Quitar moto",
+  "presets.forgetBikeOne": "Quitar {{name}} de este perfil",
+  "presets.forgetBikeQ": "¿Quitar esta moto?",
+  "presets.forgetBikeBody":
+    "“{{name}}” desaparece de la lista de motos de este perfil, junto con el aspecto guardado para ella. No se borra nada instalado: si vuelves a rodar con esa moto, el juego la añade otra vez.",
+  "presets.bikeForgotten": "“{{name}}” quitada de este perfil.",
+  "presets.forgetFailed": "No se pudo quitar esa moto",
   "presets.namePlaceholder": "Nombre del preset…",
   "presets.savePreset": "Guardar preset",
   "presets.saveChanges": "Guardar cambios",
@@ -210,6 +220,42 @@ export const es: Translation = {
   "slotGroup.rider": "Piloto",
   "slotGroup.head": "Cabeza",
   "slotGroup.body": "Cuerpo",
+
+
+  // ── Pose studio ────────────────────────────────────────────────────────────
+  "pose.help": "Coloca al piloto — dónde van las manos, cuánto se abren las piernas, una pierna adelante. Solo la vista previa; MX Bikes toma la postura del estilo de pilotaje.",
+  "pose.showing": "Mostrando",
+  "pose.none": "—",
+  "pose.bike": "Moto",
+  "pose.quick": "Posturas rápidas",
+  "pose.quickHint": "Cada una se suma a la postura, así que se acumulan. Ajusta abajo.",
+  "pose.dragHint": "Arrastra los puntos del piloto para mover un miembro: gira la articulación que está por encima de la que agarras. El miembro se mueve a la mitad de la velocidad del cursor; mantén Mayús para más precisión. Los deslizadores son para el giro y los valores exactos.",
+  "pose.reset": "Restablecer",
+  "pose.group.torso": "Torso y cabeza",
+  "pose.group.arms": "Brazos",
+  "pose.group.hands": "Manos",
+  "pose.group.legs": "Piernas",
+  "pose.move.legsWide": "Piernas más abiertas",
+  "pose.move.legsNarrow": "Piernas más juntas",
+  "pose.move.leftLegForward": "Pierna izquierda adelante",
+  "pose.move.elbowsUp": "Codos arriba",
+  "pose.move.leanIn": "Inclinarse",
+  "pose.move.ride": "Posición de pilotaje",
+  "pose.axis.bend": "Flexión",
+  "pose.axis.twist": "Giro",
+  "pose.axis.splay": "Apertura",
+  "pose.quickWaiting": "Esperando al modelo del piloto: cada movimiento es un sitio al que mandar una articulación, así que necesita el rig para saber dónde está.",
+  "pose.photo": "Foto",
+  "pose.photoHint": "El encuadre limpio oculta los puntos y los paneles. La foto se guarda al doble del tamaño del panel: abre la vista previa a pantalla completa para una mayor.",
+  "pose.cleanFrame": "Encuadre limpio",
+  "pose.savePhoto": "Guardar foto",
+  "pose.photoSaved": "Foto guardada",
+  "pose.photoFailed": "No se pudo guardar la foto",
+  "pose.scene.studio": "Estudio",
+  "pose.scene.white": "Blanco",
+  "pose.scene.sky": "Día",
+  "pose.scene.sunset": "Atardecer",
+  "pose.scene.dusk": "Anochecer",
 
   // ── Estudio del piloto ─────────────────────────────────────────────────────
   "rider.help":
@@ -309,8 +355,22 @@ export const es: Translation = {
     "No se pudo terminar: {{what}}. Windows necesita tu permiso, o la descarga no llegó — puedes instalarlo a mano.",
   "runtime.repairNoGameFolder": "No hay carpeta del juego",
   "runtime.repairNoGameFolderDesc":
-    "Los componentes están instalados, pero sin la carpeta de instalación no hay dónde dejar la copia que el juego busca. Indícala arriba y repara otra vez.",
+    "Los componentes están instalados, pero sin la carpeta de instalación no podemos revisar la carpeta del juego. Indícala arriba y repara otra vez.",
   "runtime.repairFailed": "No se pudieron reparar los componentes",
+  "runtime.strayForeign": "Un archivo de tu carpeta del juego ({{what}}) hace que MX Bikes falle.",
+  "runtime.strayLocked": "{{what}}, en tu carpeta del juego, hace que MX Bikes falle.",
+  "runtime.strayPitch":
+    "Es lo que provoca el error \"R6034\" al arrancar. Apartarlo lo soluciona, y no se borra nada.",
+  "runtime.strayLockedPitch":
+    "Es lo que provoca el error \"R6034\" al arrancar. Cierra MX Bikes primero y luego apártalo.",
+  "runtime.strayFix": "Apartarlo",
+  "runtime.strayFixHint":
+    "Lo renombra a msvcr90.dll.disabled para que Windows deje de cargarlo. No se borra nada.",
+  "runtime.strayClearing": "Moviendo…",
+  "runtime.strayCleared": "Apartado del camino",
+  "runtime.strayClearedDesc":
+    "Ahora se llama msvcr90.dll.disabled, en la misma carpeta. Vuelve a abrir MX Bikes.",
+  "runtime.strayClearFailed": "No se pudo mover el archivo",
   "update.checkFailed": "No se pudieron comprobar las actualizaciones",
   "update.failed": "La actualización falló",
 
@@ -318,14 +378,33 @@ export const es: Translation = {
   "viewer.preview3d": "Vista previa 3D",
   "viewer.expand": "Ampliar",
   "viewer.paint": "Gráficos",
+  "viewer.tyres": "Neumáticos",
+  "viewer.tyresOwn": "Los de la moto",
   "viewer.loadingModel": "Cargando modelo…",
   "viewer.loadingPaint": "Cargando gráficos…",
   "viewer.loadingRider": "Cargando piloto…",
   "viewer.riderLoadFailed": "La vista previa está desactualizada: no se pudo actualizar",
+  "viewer.both": "Ambos",
+  "viewer.onBike": "En la moto",
+  "viewer.noSeat": "El archivo de reglaje de esta moto no dice dónde está el asiento, así que el piloto no puede sentarse en ella.",
+  "viewer.loadingBike": "Cargando moto…",
+  "viewer.bikeLoadFailed": "La vista previa de la moto está desactualizada: no se pudo actualizar",
   "viewer.dragToRotate": "Arrastra para rotar",
   "viewer.scrollToZoom": "Desplaza para hacer zoom",
   "viewer.rightDragToPan": "Arrastra con el botón derecho para mover",
   "viewer.paintReloaded": "Pintura recargada",
+  "viewer.pose": "Postura",
+  "viewer.poseRear": "Trasera",
+  "viewer.poseFront": "Delantera",
+  "viewer.poseSteer": "Dirección",
+  "viewer.poseLevel": "Nivelar ruedas",
+  "viewer.poseReset": "Restablecer",
+  "viewer.place": "Colocación",
+  "viewer.placeSide": "Lateral",
+  "viewer.placeUp": "Altura",
+  "viewer.placeFwd": "Adelante",
+  "viewer.placeTurn": "Girar",
+  "viewer.resizePanel": "Arrastra para ajustar · doble clic para restablecer",
 
   // ── Combobox ───────────────────────────────────────────────────────────────
   "combobox.search": "Buscar…",
@@ -533,6 +612,7 @@ export const es: Translation = {
   "modDetail.stagePlace": "Colocar",
   "modDetail.stageReload": "Recargar",
   "modDetail.modFiles": "Archivos de mod",
+  "modDetail.loadFailed": "No se pudo cargar este mod",
   "modDetail.copied": "Copiado",
   "modDetail.copy": "Copiar",
   "modDetail.addToLibrary": "Añadir a la biblioteca",
@@ -612,11 +692,13 @@ export const es: Translation = {
   "settings.updateCheckFailed":
     "No se pudieron comprobar las actualizaciones — sin conexión o GitHub no disponible.",
   "settings.latestVersion": "Última: {{version}}",
+  "settings.frostmodStrayMsvcr90":
+    "Un archivo de tu carpeta del juego hace que MX Bikes falle con \"R6034\" — apártalo para solucionarlo.",
   "settings.frostmodRuntimeMissing":
     "A Windows le falta un componente de Visual C++ que FrostMod necesita — instálalo para quitar el error «dll was not found».",
   "settings.repairRuntimes": "Reparar componentes",
   "settings.repairRuntimesHint":
-    "Instala todos los componentes de Visual C++ que le falten a este PC (32 y 64 bits) y deja msvcr90.dll donde el juego la busca. Vale la pena aunque arriba no se vea nada mal.",
+    "Instala todos los componentes de Visual C++ que le falten a este PC, 32 y 64 bits, y retira lo que una versión anterior de esta app dejó en la carpeta del juego. Vale la pena aunque arriba no se vea nada mal.",
   "settings.frostmodNeedsRepair":
     "Los archivos instalados no coinciden con esta versión — reinstalar lo arregla.",
   "settings.frostmodRepair": "Reparar instalación",
@@ -794,7 +876,7 @@ export const es: Translation = {
     "Tu GUID se detecta solo la primera vez que uno de tus servidores te ve conectarte. Hasta entonces te identifica tu nombre de piloto.",
   "sync.guidManual": "Introducirlo manualmente",
   "sync.whereCode":
-    "No se necesita invitación. Este PC publicará tu aspecto y descargará automáticamente las pinturas que otros pilotos ya hayan publicado.",
+    "Por ahora el paint sync es solo por invitación. Los códigos se reparten en el Discord — pídelo allí y pega arriba el que te den.",
   "sync.getCode": "Pregunta en el Discord",
   "sync.sidebarOk": "Sincronizado · {{count}} pilotos",
   "sync.sidebarUnpublished": "Tu look no está publicado",
@@ -868,7 +950,7 @@ export const es: Translation = {
   "viewer.stockGearNote":
     "Mostrado sobre el {{part}} de serie del juego. Unos gráficos hechos para otro modelo pueden no encajar del todo.",
   "viewer.paintNoChange":
-    "Ninguna de las texturas de estos gráficos la usan las piezas que se muestran aquí, así que la vista previa no cambia. Aun así puede pintar las ruedas o la cadena, que esta vista no representa.",
+    "Ninguna de las texturas de estos gráficos la usan las piezas que se muestran aquí, así que la vista previa no cambia. Aun así puede pintar la cadena, que esta vista no representa.",
   "viewer.noPaintPreview": "Sin vista previa de los gráficos ({{err}})",
 
   // ── Biblioteca ─────────────────────────────────────────────────────────────
@@ -880,11 +962,53 @@ export const es: Translation = {
   "library.searchPlaceholder": "Buscar entre los instalados…",
   "library.sortFolder": "Por carpeta",
   "library.sortRecent": "Añadidas recientemente",
+  "library.showRemoved": "Eliminados",
+  "library.showRemovedHint":
+    "Muestra los mods que tuvo esta carpeta, incluidos los borrados fuera de la app",
+  "library.goneOn": "Eliminado el {{date}}",
+  "library.goneNote": "guardados para que puedas encontrarlos otra vez",
+  "library.parkedHint": "Desactivado en Gestionar — sigue en el disco",
+  "library.parkedNote": "vuelve a activarlos en Gestionar",
+  "library.nothingRemoved":
+    "Aún no falta nada. A partir de ahora se recordará todo lo que borres.",
+  "library.reinstall": "Descargar de nuevo",
+  "library.copyName": "Copiar nombre",
+  "library.copiedName": "Nombre copiado",
+  "library.forget": "Olvidar esto",
+  "library.forgetFailed": "No se pudo olvidar",
+  "library.restore": "Restaurar",
+  "library.restored": "Restaurado",
+  "library.restoreFailed": "No se pudo restaurar",
+  "library.findAgain": "Encontrarlo otra vez",
+  "library.findAgainFor": "Buscando “{{name}}” en todas las fuentes.",
+  "library.findAgainNone": "Nada con ese nombre.",
+  "library.findAgainFailed": "No se pudo buscar aquí.",
   "library.scanning": "Analizando tu biblioteca…",
   "library.empty":
     "Aún no hay {{type}} instaladas — ve a Explorar y añade alguna.",
   "library.noMatches": "Sin resultados.",
   "library.quick3d": "Ver en 3D",
+  "swapActions.menu": "Mover o eliminar este modelo",
+  "swapActions.move": "Mover a otra moto…",
+  "swapActions.delete": "Eliminar modelo…",
+  "swapActions.activeFirst": "Es el modelo activo: cambia la moto a otro modelo primero",
+  "swapActions.stockHasNoFiles": "Stock no es un set de modelo: no hay nada que mover ni eliminar",
+  "swapActions.moveTitle": "Mover {{name}} a otra moto",
+  "swapActions.moveBlurb": "Los archivos del modelo se mueven. La moto conserva todo lo demás.",
+  "swapActions.pickBike": "Elige una moto…",
+  "swapActions.liveriesTitle": "¿Llevar sus decoraciones?",
+  "swapActions.liveriesBlurb": "Una decoración se dibuja para el layout de una moto, así que rara vez encaja en otra. Lo que dejes se queda en esta moto.",
+  "swapActions.moveConfirm": "Mover",
+  "swapActions.moved": "{{name}} movido a {{bike}}",
+  "swapActions.deleteTitle": "¿Eliminar {{name}}?",
+  "swapActions.deleteBlurb_one": "Su {{count}} archivo va a la Papelera. Las decoraciones se quedan en la moto.",
+  "swapActions.deleteBlurb_other": "Sus {{count}} archivos van a la Papelera. Las decoraciones se quedan en la moto.",
+  "swapActions.deleteConfirm": "Eliminar",
+  "swapActions.deleted": "{{name}} enviado a la Papelera",
+  "library.models_one": "{{count}} modelo",
+  "library.models_other": "{{count}} modelos",
+  "library.modelsHint": "Model swaps instalados para esta moto: cámbialos en el Locker",
+  "library.modelIncomplete": "Incompleto",
   "library.selectNone": "No seleccionar nada",
   "library.move": "Mover",
   "library.uninstall": "Desinstalar",
@@ -956,6 +1080,7 @@ export const es: Translation = {
     "Cambia el modelo y el sonido del motor de cada moto entre los sets que tengas instalados.",
   "locker.rescan": "Volver a analizar",
   "locker.restore": "Restaurar",
+  "locker.hideOrphan": "Ocultar este aviso",
   "locker.register": "Registrar",
   "locker.scanning": "Analizando motos…",
   "locker.scanForSwaps": "Buscar sets",
@@ -997,6 +1122,29 @@ export const es: Translation = {
   "locker.missingSoundFiles": "A este set le falta engine.scl o sfx.cfg",
   "locker.switchTo": "Cambiar a {{name}}",
   "locker.preview3d": "Ver {{name}} en 3D — no se cambia nada",
+  "locker.view3d": "Ver 3D",
+  "locker.paints": "Pinturas",
+  "locker.assignPaints": "Elige qu\u00e9 decoraciones pertenecen a {{name}}",
+  "locker.paintsClaimed_one": "{{count}} decoraci\u00f3n asignada a este modelo",
+  "locker.paintsClaimed_other": "{{count}} decoraciones asignadas a este modelo",
+  "locker.paintsTitle": "Decoraciones de \u201c{{model}}\u201d",
+  "locker.paintsBlurb":
+    "Marca las decoraciones dise\u00f1adas para este modelo. Ser\u00e1n las \u00fanicas disponibles mientras est\u00e9 activo, y las que pertenecen a otro modelo se sacan de la carpeta paints de la moto, as\u00ed que {{game}} tampoco las lista. Una decoraci\u00f3n sin marcar en ning\u00fan modelo sigue disponible con todos.",
+  "locker.paintsFilter": "Buscar decoraciones\u2026",
+  "locker.paintsSelectAll": "Seleccionar todo",
+  "locker.paintsClearAll": "Borrar todo",
+  "locker.paintsLoading": "Leyendo decoraciones\u2026",
+  "locker.paintsNone": "Esta moto todav\u00eda no tiene decoraciones \u2014 instala una y aparecer\u00e1 aqu\u00ed.",
+  "locker.paintsNoMatch": "Ninguna decoraci\u00f3n coincide.",
+  "locker.paintsAlsoOn": "Tambi\u00e9n asignada a {{models}}",
+  "locker.paintsSaved_one": "{{count}} decoraci\u00f3n asignada a \u201c{{model}}\u201d.",
+  "locker.paintsSaved_other": "{{count}} decoraciones asignadas a \u201c{{model}}\u201d.",
+  "locker.paintsStuck_one":
+    "No se pudo mover {{count}} archivo de decoraci\u00f3n \u2014 cierra {{game}} y vuelve a escanear, o seguir\u00e1 visible en el juego.",
+  "locker.paintsStuck_other":
+    "No se pudieron mover {{count}} archivos de decoraci\u00f3n \u2014 cierra {{game}} y vuelve a escanear, o seguir\u00e1n visibles en el juego.",
+  "locker.paintsReselect": "Vuelve a seleccionar tu perfil en {{game}} para ver la nueva lista.",
+  "locker.paintsNextLaunch": "El juego mostrar\u00e1 la nueva lista la pr\u00f3xima vez que se abra.",
   "locker.tiedToModel": "Vinculado al modelo {{models}}",
   "locker.boundHint":
     "«{{sound}}» está vinculado al modelo «{{model}}» — viaja con ese modelo. Haz clic para desvincular.",
@@ -1125,6 +1273,8 @@ export const es: Translation = {
   "category.misc": "Otros",
 
   // ── Encabezados de sección (plural) ────────────────────────────────────────
+  "section.removed": "Ya no instalados",
+  "section.parked": "Apartados por Gestionar",
   "section.bikePaint": "Libreas",
   "section.bikeModelSwap": "Cambios de modelo",
   "section.sound": "Sonidos",
@@ -1201,7 +1351,13 @@ export const es: Translation = {
   "voice.deviceGone": "Ese dispositivo no está conectado",
   "voice.noDevices": "No se encontraron dispositivos de audio",
   "voice.notConnected": "Aún no conectado con nadie",
-  "voice.notConnectedDesc": "Estos ajustes controlan tu propio micrófono y auriculares, y los botones de prueba ya funcionan. Hablar de verdad con otros pilotos necesita el servidor de voz, que todavía no está hecho: aquí no se transmite nada.",
+  "voice.notConnectedDesc": "La voz se activa sola al entrar en un servidor: no hay nada que configurar, nada que descargar y nada que el servidor tenga que ejecutar. Cualquiera que esté ahí con la app aparece aquí.",
+  "voice.inRoom": "En voz en {{server}}",
+  "voice.stopped": "Voz detenida",
+  "voice.unnamedRider": "Piloto",
+  "voice.connecting": "conectando…",
+  "voice.mute": "Silenciar",
+  "voice.unmute": "Reactivar",
 
   "overlay.pressKeys": "Pulsa las teclas…",
   "overlay.needModifier": "Añade un modificador",
@@ -1227,6 +1383,52 @@ export const es: Translation = {
   "showcase.supporters.title_one": "Posible gracias a {{count}} mecenas",
   "showcase.supporters.title_other": "Posible gracias a {{count}} mecenas",
   "showcase.supporters.more": "+{{count}} más",
+  "showcase.v0111.hero.title":
+    "Los cambios de modelo protegidos se abren en 3D",
+  "showcase.v0111.hero.body":
+    "Un modelo comprado a un creador trae su malla sellada y el visor no podía leerla: al pulsar Ver en 3D decía que el modelo no tenía ninguna malla legible, aunque funciona perfectamente en el juego. Ahora se abre como cualquier otra moto.",
+  "showcase.v0111.messages":
+    "Si una moto sigue sin abrirse, la app dice qué ha fallado en realidad en vez de culpar siempre a la sincronización en la nube.",
+  "showcase.v0110.hero.title":
+    "Agarra al piloto y colócalo",
+  "showcase.v0110.hero.body":
+    "Agarra las articulaciones del piloto en la vista 3D y muévelo: manos, codos, caderas, pies. Los movimientos rápidos se acumulan, los deslizadores afinan y Posición de pilotaje lo sienta en la moto. Solo vista previa: no se toca el juego.",
+  "showcase.v0110.designer":
+    "Refleja una capa a través de la moto, selecciona varias a la vez, ajusta al arrastrar, voltea y escribe posiciones exactas.",
+  "showcase.v0110.wheels":
+    "Las motos se muestran con sus ruedas, y tú eliges sobre qué neumáticos se apoyan.",
+  "showcase.v0110.speed":
+    "Los circuitos se dibujan siete veces más rápido, las motos abren en 127 ms en vez de 201, y los mods se instalan de dos en dos.",
+  "showcase.v0110.swaps":
+    "Mueve un set de modelo a otra moto o bórralo, y mira cualquier swap en 3D desde la Biblioteca.",
+  "showcase.v0102.hero.title":
+    "Decoraciones que pertenecen al modelo que las lleva",
+  "showcase.v0102.hero.body":
+    "MX Bikes da a cada moto una sola carpeta paints y no sabe nada de los cambios de modelo, así que una malla Yami sobre una KTM ofrecía también todas las decoraciones de KTM. Cada modelo del Locker tiene ahora un botón de paleta: marca las decoraciones dibujadas para él y serán las únicas que ofrezca, también en el selector de pinturas del propio MX Bikes.",
+  "showcase.v0102.packs":
+    "Las decoraciones que venían dentro de un pack de modelo estaban instaladas pero invisibles. Al abrir el selector de ese modelo pasan a ser suyas, que es justo lo que las hace funcionar.",
+  "showcase.v0102.presets":
+    "El desplegable de decoraciones de Presets solo ofrece las que encajan con el modelo que elige el preset.",
+  "showcase.v0102.vcredist":
+    "En un Windows recién restaurado la app se cerraba nada más abrirla, sin ventana y sin registro. El instalador ahora coloca el runtime de Visual C++ de Microsoft antes de escribir la app.",
+  "showcase.v0102.msvcr90":
+    "Un msvcr90.dll suelto que la app no borra por su cuenta ya no es un fallo silencioso: nombra el archivo y ofrece desactivarlo con una pulsación.",
+  "showcase.v0102.paintsync":
+    "La sincronización de pinturas enviaba la decoración de la moto equivocada cuando dos motos compartían nombre de pintura, y las pinturas de casco, gafas, botas y protecciones no se compartían nunca.",
+  "showcase.v0101.hero.title":
+    "Tu biblioteca recuerda lo que borraste",
+  "showcase.v0101.hero.body":
+    "Antes, borrar un circuito lo borraba de la memoria de la app. Ahora guarda el nombre, el autor, dónde estaba y una imagen — así el que no sabes nombrar meses después sigue ahí para encontrarlo.",
+  "showcase.v0101.restore":
+    "Restaurar devuelve a su sitio un mod que borró la app, y “Encontrarlo otra vez” busca en mxb-mods y en la tienda con el nombre guardado.",
+  "showcase.v0101.paints":
+    "Una pintura guardada en disco ya aparece en el juego en marcha: sin alt-tab y sin volver a elegir tu perfil.",
+  "showcase.v0101.r6034":
+    "Arreglado un fallo que causaba esta app: la copia de msvcr90.dll que dejaba mataba MX Bikes con R6034. Ahora la retira.",
+  "showcase.v0101.logs":
+    "Compartir registros empaqueta lo mismo que Guardar registros y te da un enlace, en vez de un archivo que subir.",
+  "showcase.v0101.bikes":
+    "Las motos que ya no usas se pueden quitar del selector de Ajustes rápidos.",
   "showcase.v0100.hero.title": "El Designer prepara sus propias hojas",
   "showcase.v0100.hero.body":
     "Ahora crea las hojas que pide un modelo, coloca debajo los plásticos de la propia moto para calcar y abre un modelo en cerca de un segundo en vez de casi veinte.",
@@ -1466,7 +1668,7 @@ export const es: Translation = {
   // ── Registros ──────────────────────────────────────────────────────────────
   "settings.logs": "Registros",
   "logs.desc":
-    "Los archivos que hay que enviar cuando algo falla. MXB App, FrostMod y {{game}} guardan los suyos por separado — abre la carpeta que necesites o guárdalos todos en un zip para adjuntarlo a un informe.",
+    "Los archivos que hay que enviar cuando algo falla. MXB App, FrostMod y {{game}} guardan los suyos por separado — abre la carpeta que necesites, guárdalos todos en un zip, o compártelos como un enlace para pegar en un informe.",
   "logs.appLogs": "MXB App",
   "logs.appLogsDesc": "Lo que registró la propia app",
   "logs.frostmodLogsDesc": "Lo que el cargador escribió en su propia carpeta",
@@ -1485,6 +1687,20 @@ export const es: Translation = {
   "logs.savedDesc_one": "{{count}} archivo de registro, {{size}}",
   "logs.savedDesc_other": "{{count}} archivos de registro, {{size}}",
   "logs.saveFailed": "No se pudieron guardar los registros",
+  "logs.share": "Compartir registros",
+  "logs.sharePacking": "Empaquetando…",
+  "logs.sharing": "Subiendo…",
+  "logs.shared": "Registros subidos",
+  "logs.sharedCopied": "{{size}} — el enlace está en tu portapapeles.",
+  "logs.sharedDesc": "{{size}} — el enlace está abajo.",
+  "logs.sharedSummary_one": "{{count}} archivo de registro, {{size}} subidos.",
+  "logs.sharedSummary_other": "{{count}} archivos de registro, {{size}} subidos.",
+  "logs.shareFailed": "No se pudieron compartir los registros",
+  "logs.copyLink": "Copiar enlace",
+  "logs.linkCopiedShort": "Copiado",
+  "logs.linkCopied": "Enlace copiado",
+  "logs.shareWarning":
+    "El zip queda en un alojamiento público — cualquiera con el enlace puede descargarlo, así que dáselo solo a quien te lo pidió.",
   "logs.privacy":
     "Los registros contienen rutas de carpetas y lo que estaba haciendo la app — nunca tus contraseñas ni las cookies de sesión, y no se incluye ningún archivo de ajustes.",
 
@@ -1557,7 +1773,6 @@ export const es: Translation = {
   "paints.kind.bike": "Decoración de moto",
   "paints.kind.helmet": "Casco",
   "paints.kind.goggles": "Gafas",
-  "paints.kind.profileGoggles": "Gafas (piloto)",
   "paints.kind.boots": "Botas",
   "paints.kind.protection": "Protecciones",
   "paints.kind.kit": "Equipación",
@@ -1650,6 +1865,56 @@ export const es: Translation = {
     "Esta zona es la cara interior de la pieza: lo que pintes aquí mira al suelo y nunca se ve desde fuera.",
   "designer.faceHint.both":
     "La cara exterior de la pieza y su cara interior comparten esta zona, así que lo que dibujes aquí cae en las dos.",
+  // ── Designer › la selección, y qué se puede hacer con ella ────────────────────
+  "designer.layersSelected": "{{count}} capas seleccionadas",
+  "designer.position": "Posición",
+  "designer.duplicate": "Duplicar",
+  "designer.copy": "Copiar",
+  "designer.paste": "Pegar",
+  "designer.copyName": "{{name}} copia",
+  "designer.copied_one": "1 capa copiada.",
+  "designer.copied_other": "{{count}} capas copiadas.",
+  "designer.pasteWrongSize":
+    "Eso se copió de una hoja de otro tamaño, y una capa de pintura *es* la hoja: aquí no hay nada que encaje.",
+  "designer.pasteDropped_one":
+    "Se dejó fuera 1 capa de pintura: una capa de pintura es la hoja, y esta es de otro tamaño.",
+  "designer.pasteDropped_other":
+    "Se dejaron fuera {{count}} capas de pintura: una capa de pintura es la hoja, y esta es de otro tamaño.",
+  "designer.group": "Agrupar",
+  "designer.ungroup": "Desagrupar",
+  "designer.groupRow": "Juntas",
+  "designer.groupOf": "Grupo de {{count}}",
+  "designer.groupHint":
+    "Muévelas como una. Al hacer clic en cualquiera se toma el grupo entero; mantén Alt para sacar una sola capa.",
+  "designer.flip": "Voltear",
+  "designer.flipX": "Voltear de izquierda a derecha",
+  "designer.flipY": "Voltear de arriba abajo",
+
+  // ── Designer › reflejar al otro flanco ────────────────────────────────────────
+  "designer.mirror": "Reflejar al otro lado",
+  "designer.mirrorName": "{{name}} reflejada",
+  "designer.mirrorHint":
+    "Pone una copia de esta capa donde cae en el otro lado de la moto. Se calcula con el modelo en vez de volteando la hoja, así que llega a la pieza que le toca, y sigue a esta capa hasta que la desvincules.",
+  "designer.mirroredFrom": "Reflejo de «{{name}}».",
+  "designer.mirroredShort": "Reflejada",
+  "designer.mirroredOrphan": "Esto se reflejó de una capa que ya no está.",
+  "designer.unlink": "Desvincular",
+  "designer.unlinkHint":
+    "Deja de seguir y conserva lo que hay. Pasa a ser una capa normal que puedes editar por su cuenta.",
+  "designer.selectSource": "Seleccionar la original",
+  "designer.mirrorPaused":
+    "No hay modelo cargado, así que esto se queda donde se colocó la última vez en lugar de seguir.",
+  "designer.mirrorRough":
+    "El otro lado no está desplegado como reflejo de este, así que la colocación es aproximada, no exacta.",
+  "designer.mirrorWhy.no-model":
+    "Carga primero la moto en la vista previa: sin el modelo no hay otro lado que encontrar.",
+  "designer.mirrorWhy.shared":
+    "Los dos flancos están desplegados en este mismo sitio, así que esto ya está en ambos lados de la moto. Una segunda copia caería sobre la primera.",
+  "designer.mirrorWhy.centre":
+    "Esto está en el eje de la moto, que es su propio reflejo: no hay otro lado al que mandarlo.",
+  "designer.mirrorWhy.asymmetric":
+    "El modelo no tiene nada en el reflejo de este punto, así que no hay otro lado donde ponerlo.",
+
   "designer.opacity": "Opacidad",
   "designer.blend": "Fusión",
   "designer.blend.normal": "Normal",
@@ -1708,7 +1973,7 @@ export const es: Translation = {
   "designer.tool.ellipse": "Elipse",
   "designer.tool.line": "Línea",
   "designer.moveHint":
-    "Arrastra las capas sobre la hoja para colocarlas. Elige una herramienta arriba para pintar sobre ella.",
+    "Arrastra las capas sobre la hoja para colocarlas: se enganchan a las costuras y entre sí; mantén Alt para colocarlas libremente. Mayús+clic añade a la selección, arrastrar sobre el vacío hace un lazo, y el clic derecho tiene el resto. Elige una herramienta arriba para pintar sobre ella.",
   "designer.colourFrom": "Pinta con este",
   "designer.colourTo": "Funde hacia este",
   "designer.swapColours": "Intercambiar los dos colores",
@@ -1748,44 +2013,4 @@ export const es: Translation = {
   "trackViewer.whyDetails": "¿Por qué?",
   "trackViewer.copyDetails": "Copiar detalles",
   "trackViewer.copied": "Copiado",
-  "settings.integrity": "Detección de trucos",
-  "settings.integrityDesc":
-    "MX Bikes no tiene anti-cheat, así que un cliente manipulado es idéntico a uno honesto. Esto comprueba si hay algo enganchado a tu juego en ejecución.",
-  "settings.integrityWatch": "Vigilar el juego en ejecución",
-  "settings.integrityWatchDesc":
-    "Comprueba qué se carga en MX Bikes mientras juegas. Nada sale de tu equipo.",
-  "settings.integrityReport": "Compartir el resultado con los servidores",
-  "settings.integrityReportDesc":
-    "Deja que el administrador del servidor en el que estás vea tu veredicto. Los trucos conocidos se nombran; lo que solo es desconocido se cuenta, nunca se nombra.",
-  "integrity.clean": "Nada sin explicar",
-  "integrity.suspect": "Hay algo desconocido cargado",
-  "integrity.flagged": "Hay un truco conocido enganchado",
-  "integrity.unknown": "Sin comprobar",
-  "integrity.cleanDetail_one": "{{count}} archivo cargado comprobado.",
-  "integrity.cleanDetail_other": "{{count}} archivos cargados comprobados.",
-  "integrity.foundDetail_one": "{{count}} cosa que merece un vistazo.",
-  "integrity.foundDetail_other": "{{count}} cosas que merecen un vistazo.",
-  "integrity.unknownRunning":
-    "El juego está en marcha pero no se pudieron leer sus archivos cargados, así que esto no es un visto bueno.",
-  "integrity.unknownIdle": "Inicia MX Bikes y esto lo comprobará mientras ruedas.",
-  "integrity.scanNow": "Comprobar ahora",
-  "integrity.scanFailed": "No se pudo ejecutar la comprobación",
-  "integrity.offNote": "Activa la vigilancia arriba para ver qué hay enganchado a tu juego.",
-  "integrity.limitNote":
-    "Puede demostrar que tu cliente es honesto, no el de los demás. Quien hace trampas sin usar MXB App nunca se comprueba.",
-  "integrity.rulesVersion": "Lista de firmas v{{version}}.",
-  "integrity.reasonRule": "Coincide con un truco conocido.",
-  "integrity.reasonLoader":
-    "Está en la carpeta del juego con un nombre que el juego carga automáticamente.",
-  "integrity.reasonForeign":
-    "Cargado en el juego desde fuera: no es del juego, ni de Windows, ni instalado por MXB App.",
-  "integrity.reasonProcess": "Un programa de este PC que coincide con un truco conocido.",
-  "integrity.gridTitle": "Comprobaciones de clientes",
-  "integrity.gridLoading": "Leyendo…",
-  "integrity.gridEmpty": "Nadie en este servidor está informando de una comprobación ahora mismo.",
-  "integrity.gridSuspect_one": "{{count}} archivo desconocido",
-  "integrity.gridSuspect_other": "{{count}} archivos desconocidos",
-  "integrity.gridRecovered": "(antes en esta sesión)",
-  "integrity.gridNote":
-    "Aquí solo aparecen los pilotos que usan MXB App con el envío activado. Quien no esté en la lista no ha sido descartado: simplemente no ha informado.",
 };

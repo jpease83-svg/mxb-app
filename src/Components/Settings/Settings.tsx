@@ -12,6 +12,9 @@ import {
   Sparkles,
   FolderOpen,
   Download,
+  Share2,
+  Copy,
+  Loader2,
 } from "lucide-react";
 import { open as pickFolder, save as pickSavePath } from "@tauri-apps/plugin-dialog";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
@@ -24,10 +27,13 @@ import {
   getModsRoot,
   getOverlayState,
   logsInfo,
+  onLogsShareProgress,
   openLogsFolder,
+  shareLogs,
   type LogGroup,
   type LogsInfo,
   type LogsKind,
+  type LogsShare,
   overlayToggle,
   presetsListProfiles,
   setAutoRunFrostmod,
@@ -39,8 +45,6 @@ import {
   setOverlayHotkey,
   setProfilesPath,
   setRunInBackground,
-  setIntegrityReport,
-  setIntegrityWatch,
   setWatchModsReload,
   setWineRunner,
   wineHostInfo,
@@ -50,6 +54,8 @@ import {
   setExperimental,
   type ExperimentalState,
   voiceDevices,
+  voiceMute,
+  voiceStatus,
   setVoiceEnabled,
   setVoiceInputDevice,
   setVoiceOutputDevice,
@@ -58,10 +64,12 @@ import {
   voiceMeterStart,
   voiceMeterStop,
   voiceTestOutput,
+  onVoiceStatus,
   onVoiceInputLevel,
   onVoicePtt,
   setVoiceToggleToTalk,
   type VoiceDevices,
+  type VoiceStatus,
 } from "../../api/mods";
 import { useUpdate } from "../../Context/Update";
 import { usePlatform } from "../../lib/usePlatform";
@@ -69,7 +77,6 @@ import { useConfig } from "../../Context/Config";
 import GameSwitcher from "../Shell/GameSwitcher";
 import ReshadeCard from "./ReshadeCard";
 import SupportersCard from "./SupportersCard";
-import IntegrityCard from "./IntegrityCard";
 import { useTheme, type ThemeMode } from "../../Context/Theme";
 import { Trans } from "../../i18n";
 import { useI18n, type LocalePref, type TKey } from "../../i18n/context";
@@ -77,6 +84,7 @@ import { getLocale, LOCALE_OPTIONS } from "../../i18n/core";
 import { useFrostmod } from "../../Context/FrostmodContext";
 import { prettyHotkey } from "../../lib/hotkey";
 import { formatBytes, formatDateShort } from "../../lib/mods";
+import { copyText } from "../../lib/clipboard";
 import { useTour } from "../Tour/Tour";
 import { Button } from "@/Components/ui/button";
 import HelpHint from "@/Components/ui/help-hint";
@@ -106,7 +114,6 @@ export type SectionId =
   | "frostmod"
   | "reshade"
   | "logs"
-  | "integrity"
   | "experimental"
   | "supporters"
   | "about";
@@ -145,7 +152,6 @@ const GROUPS: { label: TKey; sections: { id: SectionId; label: TKey }[] }[] = [
     label: "settings.groupAdvanced",
     sections: [
       { id: "logs", label: "settings.logs" },
-      { id: "integrity", label: "settings.integrity" },
       // Had no nav entry at all before this, and rendered in the middle of the scroll
       // with nothing pointing at it.
       { id: "experimental", label: "settings.experimental" },
@@ -277,7 +283,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   // bottle on macOS. The app starts FrostMod in whichever prefix holds the game.
   const hasFrostmod = isWindows || platform === "linux" || isMac;
   const { theme, setTheme } = useTheme();
-  const { running, reload, status, installing, checking, statusError, install, start, stop, refreshStatus, missingRuntime, installRuntime, installingRuntime, repairRuntimes, repairingRuntimes } =
+  const { running, reload, status, installing, checking, statusError, install, start, stop, refreshStatus, missingRuntime, installRuntime, installingRuntime, repairRuntimes, repairingRuntimes, strayMsvcr90, clearingStray, clearStrayMsvcr90 } =
     useFrostmod();
   const { check: checkForUpdates } = useUpdate();
   const { startTour } = useTour();
@@ -343,6 +349,12 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   // something just went wrong, and a count from ten minutes ago answers the wrong question.
   const [logs, setLogs] = useState<LogsInfo | null>(null);
   const [exportingLogs, setExportingLogs] = useState(false);
+  // The link the last share came back with, kept on screen for the rest of the session:
+  // it lands on the clipboard by itself, and a clipboard that has since been used for
+  // something else is the one way an uploaded bundle is lost for good.
+  const [sharedLogs, setSharedLogs] = useState<LogsShare | null>(null);
+  const [sharingLogs, setSharingLogs] = useState<string | null>(null);
+  const [copiedLogsLink, setCopiedLogsLink] = useState(false);
   const refreshLogs = useCallback(() => {
     logsInfo()
       .then(setLogs)
@@ -383,6 +395,54 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     }
   };
 
+  /** Zip the same logs and put them on the file host, handing back one link.
+   *
+   * Saving to disk is only half of "send me your logs" — the file still has to get to
+   * whoever asked, and that is where a bug report usually stalls. This ends with a link
+   * on the clipboard. It goes to a public host, hence the warning that sits under it. */
+  const shareLogsNow = async () => {
+    setSharingLogs(t("logs.sharePacking"));
+    setSharedLogs(null);
+    setCopiedLogsLink(false);
+    const unlisten = await onLogsShareProgress((p) => {
+      // "done" arrives just before the call returns; letting it through would flash the
+      // button back to "Packing…" for a frame on the way out.
+      if (p.phase === "done") return;
+      setSharingLogs(
+        p.phase === "uploading" ? p.message || t("logs.sharing") : t("logs.sharePacking"),
+      );
+    });
+    try {
+      const share = await shareLogs();
+      setSharedLogs(share);
+      // Straight to the clipboard: the link exists to be pasted somewhere, and someone
+      // who has just waited out an upload shouldn't have to click again to collect it.
+      const copied = await copyText(shareLinkText(share));
+      setCopiedLogsLink(copied);
+      toast.success(t("logs.shared"), {
+        description: copied
+          ? t("logs.sharedCopied", { size: formatBytes(share.size) })
+          : t("logs.sharedDesc", { size: formatBytes(share.size) }),
+      });
+      refreshLogs();
+    } catch (e) {
+      toast.error(t("logs.shareFailed"), {
+        description: String(e).replace(/^Error:\s*/, ""),
+      });
+    } finally {
+      unlisten();
+      setSharingLogs(null);
+    }
+  };
+
+  const copyLogsLink = async () => {
+    if (!sharedLogs) return;
+    if (await copyText(shareLinkText(sharedLogs))) {
+      setCopiedLogsLink(true);
+      toast.success(t("logs.linkCopied"));
+    }
+  };
+
   const profilesSep = config.modsPath.includes("\\") ? "\\" : "/";
   const defaultProfilesPath =
     resolvedProfilesPath ||
@@ -395,9 +455,6 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const autoRunFrostmod = config.autoRunFrostmod ?? true;
   const instantRefresh = config.instantRefresh ?? true;
   const watchModsReload = config.watchModsReload ?? true;
-  // Defaults mirror the backend's: scanning is on, sharing the result is not.
-  const integrityWatch = config.integrityWatch ?? true;
-  const integrityReport = config.integrityReport ?? false;
 
   const overlayEnabled = config.overlayEnabled ?? true;
   const overlayHotkey = config.overlayHotkey || FALLBACK_HOTKEY;
@@ -471,6 +528,13 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   // Whether the mic key currently has the mic open. Shown because in toggle mode there is
   // nothing physical to tell you — you can walk away from a latched-open microphone.
   const [micOpen, setMicOpen] = useState(false);
+  // Who else is in voice. Pushed from the engine, so this is live without polling.
+  const [voice, setVoice] = useState<VoiceStatus>({
+    joined: false,
+    server: "",
+    peers: [],
+    error: null,
+  });
 
   const refreshDevices = useCallback(async () => {
     try {
@@ -507,6 +571,25 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     let un: (() => void) | undefined;
     void onVoicePtt(setMicOpen).then((f) => (un = f));
     return () => un?.();
+  }, []);
+
+  // The room, as it changes. Asked once for the first paint, then pushed — a rider joining
+  // mid-session should appear without the page having to ask.
+  useEffect(() => {
+    let un: (() => void) | undefined;
+    void voiceStatus().then(setVoice).catch(() => {});
+    void onVoiceStatus(setVoice).then((f) => (un = f));
+    return () => un?.();
+  }, []);
+
+  const toggleMute = useCallback((peerId: string, muted: boolean) => {
+    // Optimistic: the engine is authoritative, but its next status push is up to 20 ms away
+    // and a mute button that lags is a mute button people press twice.
+    setVoice((v) => ({
+      ...v,
+      peers: v.peers.map((p) => (p.peerId === peerId ? { ...p, muted } : p)),
+    }));
+    void voiceMute(peerId, muted);
   }, []);
 
   // Navigating to another section closes the meter with it. The state that drives it lives
@@ -617,24 +700,6 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const toggleWatchModsReload = async (v: boolean) => {
     try {
       await setWatchModsReload(v);
-      await reloadConfig();
-    } catch (e) {
-      toast.error(t("settings.updateFailed"), { description: String(e) });
-    }
-  };
-
-  const toggleIntegrityWatch = async (v: boolean) => {
-    try {
-      await setIntegrityWatch(v);
-      await reloadConfig();
-    } catch (e) {
-      toast.error(t("settings.updateFailed"), { description: String(e) });
-    }
-  };
-
-  const toggleIntegrityReport = async (v: boolean) => {
-    try {
-      await setIntegrityReport(v);
       await reloadConfig();
     } catch (e) {
       toast.error(t("settings.updateFailed"), { description: String(e) });
@@ -1222,6 +1287,79 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               </Callout>
             )}
 
+            {/* The room. Nothing here is a control except mute: joining happens because
+                the rider is on a server, which is the whole point of the feature. */}
+            {voiceEnabled && (
+              <div className="space-y-2 rounded-md border border-border/60 p-3">
+                <div className="flex items-center gap-2">
+                  <span
+                    className={cn(
+                      "size-1.5 rounded-full",
+                      voice.joined ? "bg-success" : "bg-foreground/25",
+                    )}
+                  />
+                  <span className="text-[12.5px] text-foreground/85">
+                    {voice.joined ? t("voice.inRoom", { server: voice.server }) : t("voice.notConnected")}
+                  </span>
+                </div>
+
+                {voice.error && (
+                  <Callout tone="warning" title={t("voice.stopped")}>
+                    {voice.error}
+                  </Callout>
+                )}
+
+                {voice.peers.length === 0 ? (
+                  <p className="text-[12px] leading-relaxed text-muted-foreground">
+                    {t("voice.notConnectedDesc")}
+                  </p>
+                ) : (
+                  <ul className="space-y-1">
+                    {voice.peers.map((peer) => (
+                      <li key={peer.peerId} className="flex items-center gap-2">
+                        {/* Talking is the one thing worth seeing at a glance, so it is a
+                            colour change on the row rather than an icon to look for. */}
+                        <span
+                          className={cn(
+                            "size-1.5 shrink-0 rounded-full",
+                            !peer.connected
+                              ? "bg-foreground/25"
+                              : peer.talking
+                                ? "bg-success"
+                                : "bg-foreground/40",
+                          )}
+                        />
+                        <span
+                          className={cn(
+                            "flex-1 truncate text-[12.5px]",
+                            peer.muted ? "text-muted-foreground line-through" : "text-foreground/85",
+                          )}
+                        >
+                          {peer.riderName || t("voice.unnamedRider")}
+                          {peer.raceNum > 0 && (
+                            <span className="ml-1.5 text-muted-foreground">#{peer.raceNum}</span>
+                          )}
+                        </span>
+                        {!peer.connected && (
+                          <span className="text-[11px] text-muted-foreground">
+                            {t("voice.connecting")}
+                          </span>
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 px-2 text-[11px]"
+                          onClick={() => toggleMute(peer.peerId, !peer.muted)}
+                        >
+                          {peer.muted ? t("voice.unmute") : t("voice.mute")}
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+
             <div className="h-px bg-border" />
 
             {/* Microphone. "" is a real, selectable value — it means "follow whatever
@@ -1382,12 +1520,6 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                 disabled={!voiceEnabled}
               />
             </div>
-
-            {/* Says what does and doesn't work today. A settings page that looks complete
-                while the feature can't reach anyone is the worse failure. */}
-            <Callout tone="info" title={t("voice.notConnected")}>
-              {t("voice.notConnectedDesc")}
-            </Callout>
           </Section>
           )}
 
@@ -1486,9 +1618,14 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                     ? t("settings.checkingGitHub")
                     : statusError
                       ? t("settings.updateCheckFailed")
-                      : // Above everything else: a missing Visual C++ runtime stops
-                        // FrostMod attaching at all, and no amount of repairing or
-                        // updating FrostMod puts one on the machine.
+                      : // Above everything else: a file in the game folder that aborts
+                        // MX Bikes with R6034 the moment anything loads the VC9 CRT. The
+                        // game not starting at all outranks FrostMod not attaching.
+                        strayMsvcr90
+                        ? t("settings.frostmodStrayMsvcr90")
+                        : // Then a missing Visual C++ runtime, which stops FrostMod
+                          // attaching at all — and no amount of repairing or updating
+                          // FrostMod puts one on the machine.
                         missingRuntime
                         ? t("settings.frostmodRuntimeMissing")
                         : status?.needsRepair
@@ -1506,6 +1643,22 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                 </span>
               </div>
               <div className="flex items-center gap-1.5">
+                {/* The banner carries this too, but a dismissed bar shouldn't take the
+                    only explanation with it — and this is the one press that moves a file
+                    out of somebody's game folder, so it stays somewhere they can find it
+                    again. */}
+                {strayMsvcr90 && (
+                  <Button
+                    size="sm"
+                    onClick={() => void clearStrayMsvcr90()}
+                    disabled={clearingStray || repairingRuntimes}
+                    title={t("runtime.strayFixHint")}
+                  >
+                    {clearingStray
+                      ? t("runtime.strayClearing")
+                      : t("runtime.strayFix")}
+                  </Button>
+                )}
                 {/* Its own button rather than a mode of the one below: the FrostMod
                     install and the Windows component are separate things to fix, and
                     someone can genuinely need both. */}
@@ -1646,27 +1799,6 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
           )}
 
           {/* experimental */}
-          {/* integrity — the cheat scan. Under Advanced rather than beside FrostMod: it is
-              about the game being honest, not about the app driving it, and the two toggles
-              here are the only ones on the page that decide what leaves the machine. */}
-          {active === "integrity" && (
-          <Section title={t("settings.integrity")} desc={t("settings.integrityDesc")}>
-            <ToggleRow
-              label={t("settings.integrityWatch")}
-              desc={t("settings.integrityWatchDesc")}
-              checked={integrityWatch}
-              onChange={toggleIntegrityWatch}
-            />
-            <ToggleRow
-              label={t("settings.integrityReport")}
-              desc={t("settings.integrityReportDesc")}
-              checked={integrityReport}
-              onChange={toggleIntegrityReport}
-            />
-            <IntegrityCard watching={integrityWatch} />
-          </Section>
-          )}
-
           {active === "experimental" && (
           <Section title={t("settings.experimental")}>
             <ToggleRow
@@ -1724,15 +1856,80 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               group={logs?.game}
               onOpen={() => openLogs("game")}
             />
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={saveLogs} disabled={exportingLogs}>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={saveLogs}
+                disabled={exportingLogs || !!sharingLogs}
+              >
                 <Download className="size-3.5" />
                 {exportingLogs ? t("logs.saving") : t("logs.save")}
               </Button>
-              <Button variant="outline" size="sm" onClick={refreshLogs} disabled={exportingLogs}>
+              {/* The same zip, uploaded — for the far more common case where the logs are
+                  wanted by someone who isn't sitting at this machine. */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={shareLogsNow}
+                disabled={exportingLogs || !!sharingLogs}
+              >
+                {sharingLogs ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Share2 className="size-3.5" />
+                )}
+                {sharingLogs || t("logs.share")}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={refreshLogs}
+                disabled={exportingLogs || !!sharingLogs}
+              >
                 <RefreshCw className="size-3.5" /> {t("logs.refresh")}
               </Button>
             </div>
+            {sharedLogs && (
+              <div className="flex flex-col gap-1.5">
+                <div className="flex gap-2">
+                  {/* One link is a field; a sliced bundle is a numbered list, and an
+                      `input` would eat the newlines that keep the parts apart. */}
+                  {sharedLogs.parts.length > 1 ? (
+                    <textarea
+                      readOnly
+                      value={shareLinkText(sharedLogs)}
+                      onFocus={(e) => e.currentTarget.select()}
+                      className="h-20 min-w-0 flex-1 resize-none rounded-lg border border-input bg-background px-3 py-2 font-mono text-[12px] leading-snug text-muted-foreground"
+                    />
+                  ) : (
+                    <input
+                      readOnly
+                      value={sharedLogs.url}
+                      onFocus={(e) => e.currentTarget.select()}
+                      className="min-w-0 flex-1 rounded-lg border border-input bg-background px-3 py-2 font-mono text-[12px] text-muted-foreground"
+                    />
+                  )}
+                  <Button variant="outline" size="sm" onClick={copyLogsLink}>
+                    {copiedLogsLink ? (
+                      <Check className="size-3.5" />
+                    ) : (
+                      <Copy className="size-3.5" />
+                    )}
+                    {copiedLogsLink ? t("logs.linkCopiedShort") : t("logs.copyLink")}
+                  </Button>
+                </div>
+                <span className="text-[11.5px] text-muted-foreground">
+                  {t("logs.sharedSummary", {
+                    count: sharedLogs.files,
+                    size: formatBytes(sharedLogs.size),
+                  })}
+                </span>
+                {/* Anonymous public host, no expiry — the one thing worth saying out loud
+                    before a link goes into a Discord thread. */}
+                <span className="text-[11.5px] text-warning">{t("logs.shareWarning")}</span>
+              </div>
+            )}
             <p className="text-[11.5px] leading-relaxed text-faint">
               {t("logs.privacy")}
             </p>
@@ -1941,6 +2138,16 @@ function LogRow({
       </span>
     </div>
   );
+}
+
+/** The link text a share is copied and shown as.
+ *
+ * One line for the single upload a log bundle almost always is. A bundle big enough to
+ * have been sliced needs every part, in order, or it can't be put back together — so
+ * they go out as a numbered list rather than a first link that quietly loses the rest. */
+function shareLinkText(share: LogsShare): string {
+  if (share.parts.length < 2) return share.url;
+  return share.parts.map((url, i) => `${i + 1}/${share.parts.length} ${url}`).join("\n");
 }
 
 /** "today at 14:32" / "Aug 11 at 14:32" for a log's mtime — the age is what matters,

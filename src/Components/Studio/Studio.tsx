@@ -8,6 +8,8 @@ import type { Loadout } from "../../types";
 import Designer from "./Designer/Designer";
 import PaintStudio from "../PaintStudio/PaintStudio";
 import RiderStudio from "../Rider/RiderStudio";
+import PoseStudio from "../Rider/PoseStudio";
+import RiderKitProvider from "../Rider/RiderKit";
 
 /**
  * The Studio: everything that makes something, under one tab.
@@ -22,13 +24,15 @@ import RiderStudio from "../Rider/RiderStudio";
  * first-run tour both need to open the Studio *at* a particular one.
  */
 
-export type StudioTab = "designer" | "paints" | "rider";
+export type StudioTab = "designer" | "paints" | "rider" | "pose";
 
 interface StudioProps {
   tab: StudioTab;
   onTab: (tab: StudioTab) => void;
   /** A preset handed over by the Presets tab, for the Rider sub-view to load. */
   riderPreset: Loadout | null;
+  /** The bike that preset was built against — a loadout doesn't name one. */
+  riderBike: string | null;
   onRiderPresetLoaded: () => void;
 }
 
@@ -36,6 +40,7 @@ export default function Studio({
   tab,
   onTab,
   riderPreset,
+  riderBike,
   onRiderPresetLoaded,
 }: StudioProps) {
   const t = useT();
@@ -55,7 +60,7 @@ export default function Studio({
 
   // Switching titles can take the Rider away underneath us.
   useEffect(() => {
-    if (!hasRider && tab === "rider") onTab("designer");
+    if (!hasRider && (tab === "rider" || tab === "pose")) onTab("designer");
   }, [hasRider, tab, onTab]);
 
   // One help hint, on whichever sub-view is open. Each had its own before they shared a tab,
@@ -65,7 +70,9 @@ export default function Studio({
       ? { title: t("nav.designer"), body: t("designer.help") }
       : tab === "paints"
         ? { title: t("nav.paints"), body: t("paints.help") }
-        : { title: t("nav.rider"), body: t("rider.help") };
+        : tab === "pose"
+          ? { title: t("nav.pose"), body: t("pose.help") }
+          : { title: t("nav.rider"), body: t("rider.help") };
 
   return (
     <div className="flex h-full flex-col">
@@ -80,7 +87,12 @@ export default function Studio({
           options={[
             { value: "designer", label: t("nav.designer") },
             { value: "paints", label: t("nav.paints") },
-            ...(hasRider ? [{ value: "rider" as const, label: t("nav.rider") }] : []),
+            ...(hasRider
+              ? [
+                  { value: "rider" as const, label: t("nav.rider") },
+                  { value: "pose" as const, label: t("nav.pose") },
+                ]
+              : []),
           ]}
         />
       </header>
@@ -104,10 +116,26 @@ export default function Studio({
           />
         </Pane>
       )}
-      {hasRider && visited.has("rider") && (
-        <Pane active={tab === "rider"}>
-          <RiderStudio initialLoadout={riderPreset} onLoaded={onRiderPresetLoaded} />
-        </Pane>
+      {/* Rider and Pose are two views of one kit, so the kit lives above both of them and a
+          preset is handed to it rather than to whichever sub-view happens to be mounted.
+          Still only paid for by someone who opens one of the two. */}
+      {hasRider && (visited.has("rider") || visited.has("pose")) && (
+        <RiderKitProvider
+          initialLoadout={riderPreset}
+          initialBike={riderBike}
+          onLoaded={onRiderPresetLoaded}
+        >
+          {visited.has("rider") && (
+            <Pane active={tab === "rider"}>
+              <RiderStudio />
+            </Pane>
+          )}
+          {visited.has("pose") && (
+            <Pane active={tab === "pose"}>
+              <PoseStudio />
+            </Pane>
+          )}
+        </RiderKitProvider>
       )}
     </div>
   );

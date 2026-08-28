@@ -56,10 +56,6 @@ hours), then downloads and installs them on restart.
   starts it in there rather than beside itself, and reaches it with a command file
   instead of a Windows event (nothing outside a Wine prefix can pulse one). Needs
   FrostMod v0.13.0 or newer, which is what reads that file.
-- **Live paint sync**: FrostMod v0.14.0+ reports the joined server and local rider GUID
-  through a small output-plugin session file. MXB App uses that identity to pull only the
-  matching server roster, install bike/helmet/gear paints, and signal the same live reload
-  path—even when the rider joined through MX Bikes' built-in browser.
 - **Paint studio**: builds a `.pnt` from `.tga`/`.png` sheets, and unpacks an
   existing paint back into editable sheets that keep the texture names the model
   binds — so a livery made anywhere can be packed, installed and previewed here.
@@ -71,17 +67,6 @@ hours), then downloads and installs them on restart.
   bodywork under the cursor, and a layer can be fitted to a part and clipped to its
   outline — so an image covers the shroud and stops at the seam. Save writes the
   packed `.pnt` the game reads.
-- **Cheat detection**: MX Bikes has no anti-cheat, so a hooked client looks exactly
-  like an honest one. The app reads what is loaded *into* the running game — the one
-  place an injected DLL has to be in order to hook it — and reports whether anything
-  is unaccounted for. Signatures live in
-  [`integrity-rules.json`](integrity-rules.json) on `main` and are fetched at runtime,
-  so a new cheat is detectable without a release; the binary itself ships only the
-  allowlist that keeps an ordinary machine's overlays and drivers from being reported.
-  A verdict can be shared with the server you're on, which is the only way a server
-  currently has of asking a client anything about itself. It proves an honest client
-  is honest — it can't prove anyone else's is, since a cheater who doesn't run MXB App
-  is never scanned.
 - **Self-update**: `tauri-plugin-updater` against the `latest.json` published with
   each release; signature-verified, installs on restart.
 - **Supporters**: Settings → Supporters credits the people who bought a coffee on
@@ -219,10 +204,9 @@ skips the announcement. It's for testing that a build compiles, not for shipping
 Features coming next:
 
 - **Servers, with paint sync.** Creating and running a dedicated server from the
-  app, and everyone on it seeing everyone else's published paint. Public beta
-  enrollment is open on the AMX deployment. A viewer can run the app alone, but
-  a paint must have been published previously and its underlying custom bike or
-  helmet model must already be installed on the viewer's PC.
+  app, and everyone on it seeing everyone else's paint. Both are built and both
+  need an account on the control plane, which is invite-only for now — opening
+  that up is the remaining work.
 - **A map viewer.** Look at a track before you ride it. The 3D viewer already
   renders bikes and riders straight from the game's own meshes; a track is the
   one thing it doesn't read yet.

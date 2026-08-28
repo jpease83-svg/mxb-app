@@ -8,7 +8,7 @@ use scraper::{Html, Selector};
 use serde::Serialize;
 use std::fs::File;
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -93,12 +93,28 @@ pub(crate) fn staging_dir(tag: &str) -> PathBuf {
     ))
 }
 
-pub(crate) fn build_client() -> anyhow::Result<Client> {
-    Ok(Client::builder()
+fn client_builder() -> reqwest::ClientBuilder {
+    Client::builder()
         .user_agent(UA)
         .connect_timeout(Duration::from_secs(15))
         .cookie_store(true)
-        .build()?)
+}
+
+pub(crate) fn build_client() -> anyhow::Result<Client> {
+    Ok(client_builder().build()?)
+}
+
+/// How long a transfer may go silent before we call it dead. Resets on every read, so a
+/// slow host trickling bytes is never touched.
+const READ_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// [`build_client`] with a read timeout, for fetching mod archives.
+///
+/// [`download`]'s resume loop only wakes when the stream *errors*, and a silent socket never
+/// does — so without this a host that stops sending hangs forever. Not on [`build_client`]
+/// itself: an upload sees no response until its last byte is sent, which looks identical.
+pub(crate) fn build_download_client() -> anyhow::Result<Client> {
+    Ok(client_builder().read_timeout(READ_TIMEOUT).build()?)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -111,7 +127,7 @@ pub async fn add_to_library(
     subpath: &str,
     dest_folder: &str,
 ) -> anyhow::Result<()> {
-    let client = build_client()?;
+    let client = build_download_client()?;
 
     // MEGA is end-to-end encrypted — no direct URL; use the fetch-and-decrypt path.
     let h = host.to_lowercase();
@@ -153,7 +169,33 @@ pub async fn download_and_place(
             return Err(e);
         }
     };
-    extract_and_place(app, cfg, slug, &archive, &work, subpath, dest_folder)
+    extract_and_place_blocking(app, cfg, slug, archive, work, subpath, dest_folder).await
+}
+
+/// [`extract_and_place`] on a blocking thread.
+///
+/// Unpacking a track is minutes of synchronous disk work, and inline on an `async` command it
+/// pins a runtime worker for all of it. The shop and import commands already spawn it; the
+/// site download was the one that didn't.
+async fn extract_and_place_blocking(
+    app: &AppHandle,
+    cfg: &AppConfig,
+    slug: &str,
+    archive: PathBuf,
+    work: PathBuf,
+    subpath: &str,
+    dest_folder: &str,
+) -> anyhow::Result<()> {
+    let app = app.clone();
+    let cfg = cfg.clone();
+    let slug = slug.to_string();
+    let subpath = subpath.to_string();
+    let dest_folder = dest_folder.to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        extract_and_place(&app, &cfg, &slug, &archive, &work, &subpath, &dest_folder)
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("install task failed: {e}"))?
 }
 
 /// Extract a downloaded archive and place it. `pub(crate)` for the shop, whose bytes come
@@ -185,15 +227,29 @@ pub(crate) fn extract_and_place(
 
     let mods_dir = crate::library::mods_subdir(&cfg.mods_path, "mods");
     let type_folder = subpath.rsplit(['/', '\\']).next().unwrap_or("tracks");
-    place_mod(&extracted, &mods_dir, type_folder, dest_folder, slug)?;
 
-    // Record which bikes got a sound so the Library can tell them from stock (best-effort).
-    if type_folder.eq_ignore_ascii_case("bikes") {
-        let bikes = sound_bikes_in(&extracted);
-        if !bikes.is_empty() {
-            if let Ok(dir) = app.path().app_local_data_dir() {
-                let _ = crate::soundmods::record(&dir, &bikes, slug);
-            }
+    // Read before the placement, because it walks the staged tree and `Consume` empties it.
+    // Still recorded after, so a failed install badges nothing (best-effort either way).
+    let bikes = if type_folder.eq_ignore_ascii_case("bikes") {
+        sound_bikes_in(&extracted)
+    } else {
+        Vec::new()
+    };
+
+    place_mod_with(
+        &extracted,
+        &mods_dir,
+        type_folder,
+        dest_folder,
+        slug,
+        OnConflict::Overwrite,
+        // Everything under `work` is ours and is deleted a few lines down.
+        Staging::Consume,
+    )?;
+
+    if !bikes.is_empty() {
+        if let Ok(dir) = app.path().app_local_data_dir() {
+            let _ = crate::soundmods::record(&dir, &bikes, slug);
         }
     }
 
@@ -223,7 +279,7 @@ async fn download_mega_and_place(
             return Err(e);
         }
     };
-    extract_and_place(app, cfg, slug, &archive, &work, subpath, dest_folder)
+    extract_and_place_blocking(app, cfg, slug, archive, work, subpath, dest_folder).await
 }
 
 pub(crate) async fn download_mega(
@@ -364,7 +420,17 @@ pub fn import_file(
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| "import".to_string());
-    place_mod(&extracted, &mods_dir, type_folder, dest_folder, &slug)?;
+    // `extracted` sits under `work`, which is deleted below — the picked file itself is never
+    // touched, only the copy `extract_archive` just made of it.
+    place_mod_with(
+        &extracted,
+        &mods_dir,
+        type_folder,
+        dest_folder,
+        &slug,
+        OnConflict::Overwrite,
+        Staging::Consume,
+    )?;
 
     let _ = std::fs::remove_dir_all(&work);
 
@@ -417,12 +483,15 @@ fn mediafire_api(path: &str, query: &str) -> String {
 
 /// Resolve a MediaFire share to something [`download`] can stream.
 ///
-/// The file page is a moving target — MediaFire has reshaped it repeatedly, and every
-/// reshape broke installs the same way, with "couldn't find the MediaFire download link"
-/// on links that were perfectly fine in a browser. So the page is no longer the first
-/// thing we ask. MediaFire's own API answers the same question from the share's quick key
-/// under a versioned contract; scraping stays behind it, for links whose key we can't read
-/// and for the day the API stops answering.
+/// Both routes are kept, because each has been the working one: the API doesn't care what the
+/// file page looks like this month, and the page doesn't care what MediaFire has decided
+/// anonymous callers may have.
+///
+/// The page goes first because the API is currently the one that doesn't answer. Measured
+/// across eight real tracks, `file/get_links.php` refused every one with "Insufficient
+/// Permissions" and the scrape rescued all eight — so asking the API first was ~320 ms of
+/// guaranteed-useless round trip on every install. It stays as the fallback: it costs nothing
+/// while the page keeps parsing, and it is still the route that survives a reshape.
 async fn resolve_mediafire(client: &Client, url: &str) -> anyhow::Result<String> {
     // Already a CDN link — mod pages do occasionally list one. Nothing to resolve.
     if is_mediafire_direct(url) {
@@ -433,12 +502,6 @@ async fn resolve_mediafire(client: &Client, url: &str) -> anyhow::Result<String>
     // nothing, and reported the link as broken.
     if let Some(folder) = mediafire_folder_key(url) {
         return resolve_mediafire_folder(client, &folder).await;
-    }
-
-    if let Some(key) = mediafire_quick_key(url) {
-        if let Some(direct) = mediafire_api_link(client, &key).await? {
-            return Ok(direct);
-        }
     }
 
     let html = client
@@ -456,16 +519,28 @@ async fn resolve_mediafire(client: &Client, url: &str) -> anyhow::Result<String>
         .text()
         .await?;
 
-    // The refusal check runs only once parsing has come up empty, never ahead of it: it
+    if let Some(direct) = parse_mediafire_link(&html) {
+        return Ok(direct);
+    }
+
+    // The page didn't parse. Ask the API before giving up — and let its refusal speak, since
+    // "this file is password protected" beats "couldn't find the download link".
+    if let Some(key) = mediafire_quick_key(url) {
+        if let Some(direct) = mediafire_api_link(client, &key).await? {
+            return Ok(direct);
+        }
+    }
+
+    // The refusal check runs only once both have come up empty, never ahead of them: it
     // matches on the page's raw source, and an error string sitting in a *working* page's
     // JavaScript would otherwise condemn a file that was about to download fine.
-    parse_mediafire_link(&html).ok_or_else(|| {
-        anyhow::anyhow!(mediafire_page_error(&html).unwrap_or_else(|| {
+    Err(anyhow::anyhow!(mediafire_page_error(&html).unwrap_or_else(
+        || {
             "Couldn't find the MediaFire download link — open the mod page to download it \
              manually."
                 .to_string()
-        }))
-    })
+        }
+    )))
 }
 
 /// Ask the API for a share's direct link.
@@ -1192,7 +1267,7 @@ fn filename_from(resp: &reqwest::Response, url: &str) -> String {
             .captures(cd)
         {
             let name = c[1].trim().trim_matches('"');
-            if !name.is_empty() {
+            if is_usable_filename(name) {
                 return sanitize(name);
             }
         }
@@ -1205,11 +1280,21 @@ fn filename_from(resp: &reqwest::Response, url: &str) -> String {
         .next()
         .unwrap_or("")
         .to_string();
-    if from_url.is_empty() {
-        "download.bin".to_string()
-    } else {
+    if is_usable_filename(&from_url) {
         sanitize(&from_url)
+    } else {
+        "download.bin".to_string()
     }
+}
+
+/// Whether a name a server handed us can be used as a file name at all.
+///
+/// `sanitize` strips separators but leaves dots alone, so `..` would survive it and name the
+/// staging folder's parent. Both sources here are remote — a `Content-Disposition` header and
+/// the URL — and a share code chooses the URL.
+fn is_usable_filename(name: &str) -> bool {
+    let name = name.trim();
+    !name.is_empty() && name != "." && name != ".."
 }
 
 pub(crate) fn extract_archive(archive: &Path, dest: &Path) -> anyhow::Result<()> {
@@ -1217,6 +1302,10 @@ pub(crate) fn extract_archive(archive: &Path, dest: &Path) -> anyhow::Result<()>
         "zip" => {
             let file = File::open(archive)?;
             zip::ZipArchive::new(file)?.extract(dest)?;
+            // `zip` filters `..` out of entry names, but a symlink entry is the escape a
+            // name filter can't see: the link lands inside `dest` and points anywhere, and
+            // the entries after it are written straight through it. Sweep it like the rest.
+            purge_escapees(archive, dest)?;
         }
         "7z" => {
             sevenz_rust::decompress_file(archive, dest)
@@ -1607,6 +1696,21 @@ pub(crate) enum OnConflict {
     Keep,
 }
 
+/// Whether a placement may take the source files away with it.
+///
+/// A downloaded mod is already on disk twice — the archive and the unpacked copy, both in a
+/// staging directory we delete moments later. Copying a third time is the slowest part of an
+/// install once the bytes are down.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Staging {
+    /// The source is ours and about to be deleted, so a file may be *moved* into place — on
+    /// one volume that's a rename, and no bytes move.
+    Consume,
+    /// The source has to survive. The dropzone is why this is the default: it installs a
+    /// folder straight from wherever the user keeps it.
+    Preserve,
+}
+
 pub(crate) fn place_mod(
     extracted: &Path,
     mods_dir: &Path,
@@ -1614,9 +1718,18 @@ pub(crate) fn place_mod(
     dest_folder: &str,
     slug: &str,
 ) -> anyhow::Result<usize> {
-    place_mod_with(extracted, mods_dir, type_folder, dest_folder, slug, OnConflict::Overwrite)
+    place_mod_with(
+        extracted,
+        mods_dir,
+        type_folder,
+        dest_folder,
+        slug,
+        OnConflict::Overwrite,
+        Staging::Preserve,
+    )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn place_mod_with(
     extracted: &Path,
     mods_dir: &Path,
@@ -1624,9 +1737,11 @@ pub(crate) fn place_mod_with(
     dest_folder: &str,
     slug: &str,
     on_conflict: OnConflict,
+    staging: Staging,
 ) -> anyhow::Result<usize> {
     let route = plan_placement(extracted, mods_dir, type_folder, dest_folder, slug);
-    apply(&route.placement, on_conflict).inspect_err(|e| {
+    guard_placement(mods_dir, &route.placement)?;
+    apply(&route.placement, on_conflict, staging).inspect_err(|e| {
         // The one place every install — download, import, drop — funnels through, so one
         // log line here covers all three. Without it a failed install left no trace at all
         // beyond a toast the player had already dismissed by the time they reported it.
@@ -1680,7 +1795,38 @@ fn roots_for(placement: &Placement) -> Vec<PathBuf> {
 /// or even whether it was the source or the destination. Every step says what it was doing
 /// to what, and a failure is logged as well as returned — the toast is transient, the log
 /// is what a player can send back.
-fn apply(placement: &Placement, on_conflict: OnConflict) -> anyhow::Result<usize> {
+/// Refuse a placement that would write outside the mods folder.
+///
+/// `type_folder` and `dest_folder` are joined onto `mods_dir`, and `Path::join` is happy to
+/// accept `..` in either — a file-share code picks its type folder from a path the sender
+/// wrote, and the dropzone's destination comes back from the frontend. Every install funnels
+/// through [`place_mod_with`], so the check belongs here rather than at each of its doors.
+fn guard_placement(mods_dir: &Path, placement: &Placement) -> anyhow::Result<()> {
+    let dsts = roots_for(placement)
+        .into_iter()
+        .chain(writes_for(placement).into_iter().map(|(_, dst)| dst));
+    for dst in dsts {
+        // `starts_with` alone would pass `<mods>/..`: joining never normalises, so the
+        // climb is still sitting there as a component.
+        let inside = dst
+            .strip_prefix(mods_dir)
+            .map(|rel| !rel.components().any(|c| c == Component::ParentDir))
+            .unwrap_or(false);
+        if !inside {
+            anyhow::bail!(
+                "refusing to install to {} — that's outside the mods folder",
+                dst.display()
+            );
+        }
+    }
+    Ok(())
+}
+
+fn apply(
+    placement: &Placement,
+    on_conflict: OnConflict,
+    staging: Staging,
+) -> anyhow::Result<usize> {
     for root in roots_for(placement) {
         std::fs::create_dir_all(&root)
             .with_context(|| format!("creating {}", root.display()))?;
@@ -1699,6 +1845,12 @@ fn apply(placement: &Placement, on_conflict: OnConflict) -> anyhow::Result<usize
         if let Some(parent) = dst.parent() {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("creating {}", parent.display()))?;
+        }
+        // Only ever a shortcut: a cross-drive move fails, so does a held file, and both fall
+        // through to `copy_staged` — which is where the wait-out-the-scanner retry lives.
+        if staging == Staging::Consume && std::fs::rename(src, dst).is_ok() {
+            written += 1;
+            continue;
         }
         copy_staged(src, dst)?;
         written += 1;
@@ -1775,23 +1927,34 @@ fn worth_retrying(dst: &Path, e: &std::io::Error) -> bool {
 
 /// Turn a failed copy into something a player can act on.
 ///
-/// A staged file that has gone missing is the one case where the raw error actively
+/// A staged file the copy can no longer read is the one case where the raw error actively
 /// misleads: it reads as if the *mod* were broken, when the bytes downloaded fine and
 /// something on the machine took them away afterwards. Name the culprit and the folder to
 /// exclude, because "os error 2" leaves a player with nowhere to go.
+///
+/// The probe is a real read, not [`Path::exists`]: `exists` opens for no access at all, so a
+/// scanner blocking a file's *contents* waves it through while `fs::copy`, which asks for
+/// `GENERIC_READ`, is told "os error 2". Gating on `exists` meant this never fired.
 fn copy_failure(src: &Path, dst: &Path, e: std::io::Error) -> anyhow::Error {
-    if e.kind() == std::io::ErrorKind::NotFound && !src.exists() {
+    if let Err(probe) = File::open(src) {
         let name = src.file_name().unwrap_or_default().to_string_lossy().into_owned();
         let folder = src
             .parent()
             .map(|p| p.display().to_string())
             .unwrap_or_else(|| src.display().to_string());
+        // The copy says what it hit, the probe says why the file won't open; a report needs both.
+        log::error!("staged {name} could not be reopened: copy said {e}, opening said {probe}");
+        let fate = if probe.kind() == std::io::ErrorKind::NotFound {
+            "deleted or quarantined"
+        } else {
+            "locked against being read"
+        };
         return anyhow::anyhow!(
-            "{name} vanished from the staging folder part-way through the install. The \
-             download itself worked — something deleted or quarantined the file before it \
-             could be copied into place, which is almost always antivirus (mod .pkz files \
-             are a common false positive) or a temp-folder cleaner. Add an exclusion for \
-             {folder} and install it again."
+            "{name} could not be read back from the staging folder part-way through the \
+             install — it was {fate} after the download finished. The download itself \
+             worked, so this is almost always antivirus (mod .pkz files are a common false \
+             positive) or a temp-folder cleaner. Add an exclusion for {folder} and install \
+             it again."
         );
     }
     anyhow::Error::new(e).context(format!("copying {} to {}", src.display(), dst.display()))
@@ -2639,6 +2802,83 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// The saving itself: the file lands without its bytes being written again, so the
+    /// staged copy is gone rather than duplicated.
+    #[test]
+    fn consuming_a_staged_tree_moves_the_files() {
+        let root = place_tmp("consume");
+        let ex = root.join("ex");
+        std::fs::create_dir_all(&ex).unwrap();
+        std::fs::write(ex.join("track.pkz"), b"bytes").unwrap();
+
+        let mods = root.join("mods");
+        let placed = place_mod_with(
+            &ex,
+            &mods,
+            "tracks",
+            "",
+            "slug",
+            OnConflict::Overwrite,
+            Staging::Consume,
+        )
+        .unwrap();
+
+        assert_eq!(placed, 1);
+        assert_eq!(std::fs::read(mods.join("tracks/track.pkz")).unwrap(), b"bytes");
+        assert!(!ex.join("track.pkz").exists(), "the staged copy was moved, not copied");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The dropzone installs from the user's own folder, so the default must not touch it.
+    #[test]
+    fn preserving_leaves_the_source_alone() {
+        let root = place_tmp("preserve");
+        let ex = root.join("ex");
+        std::fs::create_dir_all(&ex).unwrap();
+        std::fs::write(ex.join("track.pkz"), b"bytes").unwrap();
+
+        let mods = root.join("mods");
+        let placed = place_mod(&ex, &mods, "tracks", "", "slug").unwrap();
+
+        assert_eq!(placed, 1);
+        assert_eq!(std::fs::read(mods.join("tracks/track.pkz")).unwrap(), b"bytes");
+        assert_eq!(
+            std::fs::read(ex.join("track.pkz")).unwrap(),
+            b"bytes",
+            "the user's own copy is still theirs"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Re-installing is how a player updates a mod, so the rename has to replace the
+    /// destination rather than fail on it.
+    #[test]
+    fn consuming_overwrites_an_existing_file() {
+        let root = place_tmp("consume-overwrite");
+        let ex = root.join("ex");
+        std::fs::create_dir_all(&ex).unwrap();
+        std::fs::write(ex.join("track.pkz"), b"new").unwrap();
+
+        let mods = root.join("mods");
+        std::fs::create_dir_all(mods.join("tracks")).unwrap();
+        std::fs::write(mods.join("tracks/track.pkz"), b"old").unwrap();
+
+        let placed = place_mod_with(
+            &ex,
+            &mods,
+            "tracks",
+            "",
+            "slug",
+            OnConflict::Overwrite,
+            Staging::Consume,
+        )
+        .unwrap();
+
+        assert_eq!(placed, 1);
+        assert_eq!(std::fs::read(mods.join("tracks/track.pkz")).unwrap(), b"new");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn pkz_alongside_server_and_source_folders_installs_only_pkz() {
         // Mirrors the I40 MX bundle: the client `.pkz` plus a dedicated-server
@@ -2695,6 +2935,26 @@ mod tests {
             .join("bikes/MX1OEM_2023_KTM_450_SX-F/paints/cool.pnt")
             .exists());
         assert!(!mods.join("tracks/MX1OEM_2023_KTM_450_SX-F").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The type folder is not always ours to trust — a file-share code picks it from a path
+    /// the sender wrote. `mods_dir.join("..")` is the MX Bikes folder itself, next to the
+    /// executable, so the placement has to be refused rather than merely misrouted.
+    #[test]
+    fn refuses_a_destination_outside_the_mods_folder() {
+        let root = place_tmp("escape-place");
+        let ex = root.join("ex");
+        touch(&ex.join("evil.dll"));
+        let mods = root.join("game/mods");
+        std::fs::create_dir_all(&mods).unwrap();
+
+        for (type_folder, dest_folder) in [("..", ""), ("tracks", "../.."), ("../..", "x")] {
+            let err = place_mod(&ex, &mods, type_folder, dest_folder, "slug").unwrap_err();
+            assert!(err.to_string().contains("outside the mods folder"), "{err}");
+        }
+        assert!(!root.join("game/evil.dll").exists(), "a placement escaped the mods folder");
+        assert!(!root.join("evil.dll").exists(), "a placement escaped the mods folder");
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -3015,6 +3275,39 @@ mod tests {
         assert!(msg.contains("Scottsdale.pkz"), "{msg}");
         assert!(msg.contains(&staging.display().to_string()), "{msg}");
         assert!(msg.to_lowercase().contains("antivirus"), "{msg}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The other half of the same trap, and the one that got past us: the staged file is
+    /// still listed, only its contents are out of reach. `Path::exists` answers yes — it
+    /// opens for no access at all — so gating the advice on it handed the player a bare
+    /// "os error 2" for a scanner hold. Unreadable has to count as gone.
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_staged_file_blames_the_right_thing() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = place_tmp("unreadable");
+        let staging = root.join("ex");
+        let mods = root.join("mods");
+        std::fs::create_dir_all(&mods).unwrap();
+        let src = staging.join("Scottsdale.pkz");
+        touch(&src);
+        std::fs::set_permissions(&src, std::fs::Permissions::from_mode(0o000)).unwrap();
+        if File::open(&src).is_ok() {
+            // Running as root, where the mode is advisory and there is nothing to stand in
+            // for the scanner.
+            let _ = std::fs::remove_dir_all(&root);
+            return;
+        }
+        assert!(src.exists(), "the entry is still there — that is the whole trap");
+
+        let err = copy_staged(&src, &mods.join("Scottsdale.pkz")).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("Scottsdale.pkz"), "{msg}");
+        assert!(msg.contains(&staging.display().to_string()), "{msg}");
+        assert!(msg.to_lowercase().contains("antivirus"), "{msg}");
+
+        std::fs::set_permissions(&src, std::fs::Permissions::from_mode(0o644)).unwrap();
         let _ = std::fs::remove_dir_all(&root);
     }
 

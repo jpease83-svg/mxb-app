@@ -8,10 +8,12 @@ import {
   AlertTriangle,
   Ban,
   Box,
+  Palette,
   FolderInput,
   Link2,
   Link2Off,
   Wrench,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -38,6 +40,8 @@ import type {
   SwapApplyOutcome,
 } from "../../types";
 import RegisterSwapsDialog from "./RegisterSwapsDialog";
+import AssignPaintsDialog from "./AssignPaintsDialog";
+import { ModelSwapActions } from "./ModelSwapActions";
 import { ViewerDialog } from "../Viewer/ViewerDialog";
 import { useConfig } from "../../Context/Config";
 import { Trans } from "../../i18n";
@@ -55,6 +59,35 @@ import { useT, type TFunc } from "../../i18n/context";
  * switching a model preserves the sound (and vice versa). A sound can optionally be
  * **bound** to a model swap, so activating that model pulls its sound along.
  */
+
+/**
+ * Orphan warnings the user has hidden, keyed on the bike *and* the files it's missing —
+ * a different breakage on the same bike is news again. Stored per machine, since which
+ * bikes are broken is a property of the install, not the account.
+ */
+const HIDDEN_ORPHANS_KEY = "mxb:orphanWarningsHidden:v1";
+
+function orphanKey(o: OrphanedSetup): string {
+  return `${o.bike}/${[...o.files].sort().join(",")}`;
+}
+
+function readHiddenOrphans(): Set<string> {
+  return new Set(
+    (localStorage.getItem(HIDDEN_ORPHANS_KEY) ?? "").split("|").filter(Boolean),
+  );
+}
+
+function writeHiddenOrphans(keys: Set<string>): Set<string> {
+  localStorage.setItem(HIDDEN_ORPHANS_KEY, [...keys].join("|"));
+  return keys;
+}
+
+/** Forget hidden warnings whose breakage is gone, so a repaired bike that breaks the
+ *  same way later warns afresh instead of staying silently hidden forever. */
+function pruneHiddenOrphans(live: OrphanedSetup[]): Set<string> {
+  const alive = new Set(live.map(orphanKey));
+  return writeHiddenOrphans(new Set([...readHiddenOrphans()].filter((k) => alive.has(k))));
+}
 
 /**
  * Trailing feedback for a swap toast.
@@ -149,8 +182,12 @@ export default function Locker() {
   // Model sets found sitting loose outside `FrostMod Models/` (banner + dialog).
   const [loose, setLoose] = useState<LooseSwapBike[]>([]);
   const [registerOpen, setRegisterOpen] = useState(false);
+  // The model whose liveries are being assigned, with the bike's scan it was opened from.
+  const [assigning, setAssigning] = useState<{ models: BikeModels; model: string } | null>(null);
   // Bikes gutted by a pre-0.6.3 swap — their setup files are in a swap folder.
   const [orphaned, setOrphaned] = useState<OrphanedSetup[]>([]);
+  // Of those, the ones the user has hidden with the banner's ✕.
+  const [hiddenOrphans, setHiddenOrphans] = useState<Set<string>>(readHiddenOrphans);
 
   const load = useCallback(async () => {
     setError(null);
@@ -159,11 +196,14 @@ export default function Locker() {
         scanModelSwaps(),
         scanSoundSwaps().catch(() => [] as BikeSounds[]),
         detectLooseSwaps().catch(() => [] as LooseSwapBike[]),
-        detectOrphanedSetup().catch(() => [] as OrphanedSetup[]),
+        detectOrphanedSetup().catch(() => null),
       ]);
       setRows(mergeRows(models, sounds));
       setLoose(detected);
-      setOrphaned(broken);
+      setOrphaned(broken ?? []);
+      // Prune only off a scan that actually ran — a failed detection is no evidence the
+      // breakage is fixed, and would drop the hidden warnings for nothing.
+      if (broken) setHiddenOrphans(pruneHiddenOrphans(broken));
     } catch (e) {
       setError(String(e));
       setRows([]);
@@ -207,6 +247,10 @@ export default function Locker() {
     },
     [load],
   );
+
+  const onHideOrphan = useCallback((o: OrphanedSetup) => {
+    setHiddenOrphans(writeHiddenOrphans(new Set(readHiddenOrphans()).add(orphanKey(o))));
+  }, []);
 
   const onRepair = (bike: string) =>
     run(
@@ -253,37 +297,47 @@ export default function Locker() {
         </button>
       </header>
 
-      {orphaned.map((o) => (
-        <div
-          key={o.bike}
-          className="mx-7 mb-3.5 flex items-center gap-2.5 rounded-lg border border-destructive/30 bg-destructive/[0.07] px-3.5 py-2.5"
-        >
-          <Wrench className="size-4 flex-none text-destructive/80" />
-          <span className="min-w-0 flex-1 text-[12.5px] text-foreground/90">
-            <Trans
-              k="locker.orphanBanner"
-              values={{
-                bike: <span className="font-semibold">{o.bike}</span>,
-                files: (
-                  <span className="font-mono text-faint">{o.files.join(", ")}</span>
-                ),
-              }}
-            />
-          </span>
-          <button
-            onClick={() => void onRepair(o.bike)}
-            disabled={busy !== null}
-            className="flex flex-none items-center gap-1.5 rounded-md bg-destructive/15 px-2.5 py-1.5 text-[12px] font-semibold text-destructive transition-colors hover:bg-destructive/25 disabled:opacity-50"
+      {orphaned
+        .filter((o) => !hiddenOrphans.has(orphanKey(o)))
+        .map((o) => (
+          <div
+            key={o.bike}
+            className="mx-7 mb-3.5 flex items-center gap-2.5 rounded-lg border border-destructive/30 bg-destructive/[0.07] px-3.5 py-2.5"
           >
-            {busy === o.bike ? (
-              <Loader2 className="size-3.5 animate-spin" />
-            ) : (
-              <Wrench className="size-3.5" />
-            )}
-            {t("locker.restore")}
-          </button>
-        </div>
-      ))}
+            <Wrench className="size-4 flex-none text-destructive/80" />
+            <span className="min-w-0 flex-1 text-[12.5px] text-foreground/90">
+              <Trans
+                k="locker.orphanBanner"
+                values={{
+                  bike: <span className="font-semibold">{o.bike}</span>,
+                  files: (
+                    <span className="font-mono text-faint">{o.files.join(", ")}</span>
+                  ),
+                }}
+              />
+            </span>
+            <button
+              onClick={() => void onRepair(o.bike)}
+              disabled={busy !== null}
+              className="flex flex-none items-center gap-1.5 rounded-md bg-destructive/15 px-2.5 py-1.5 text-[12px] font-semibold text-destructive transition-colors hover:bg-destructive/25 disabled:opacity-50"
+            >
+              {busy === o.bike ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Wrench className="size-3.5" />
+              )}
+              {t("locker.restore")}
+            </button>
+            <button
+              onClick={() => onHideOrphan(o)}
+              aria-label={t("locker.hideOrphan")}
+              title={t("locker.hideOrphan")}
+              className="flex size-7 flex-none items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive"
+            >
+              <X className="size-3.5" />
+            </button>
+          </div>
+        ))}
 
       {looseCount > 0 && (
         <button
@@ -374,6 +428,7 @@ export default function Locker() {
                 disabled={busy !== null}
                 onModelSwap={onModelSwap}
                 onSoundSwap={onSoundSwap}
+                onAssignPaints={(models, model) => setAssigning({ models, model })}
                 onPreview={
                   bikePreview
                     ? (bike, variant) => setPreview({ bike, variant })
@@ -381,6 +436,7 @@ export default function Locker() {
                 }
                 onBind={onBind}
                 onUnbind={onUnbind}
+                onChanged={() => void load()}
               />
             ))}
           </div>
@@ -393,6 +449,20 @@ export default function Locker() {
         bikes={loose}
         onDone={() => void load()}
       />
+
+      {/* Keyed by bike + model so opening it for another model remounts: the tick state
+          is seeded once, and reseeding mid-edit when a rescan lands would lose the edit. */}
+      {assigning && (
+        <AssignPaintsDialog
+          key={`${assigning.models.bike}/${assigning.model}`}
+          open
+          onOpenChange={(o) => !o && setAssigning(null)}
+          bike={assigning.models.bike}
+          model={assigning.model}
+          models={assigning.models}
+          onDone={() => void load()}
+        />
+      )}
 
       <ViewerDialog
         open={preview !== null}
@@ -412,8 +482,10 @@ function BikeCard({
   onModelSwap,
   onSoundSwap,
   onPreview,
+  onAssignPaints,
   onBind,
   onUnbind,
+  onChanged,
 }: {
   row: Row;
   busy: boolean;
@@ -422,8 +494,11 @@ function BikeCard({
   onSoundSwap: (bike: string, target: string) => void;
   /** Undefined when this build can't draw bike geometry — then no row offers a preview. */
   onPreview?: (bike: string, variant: string) => void;
+  onAssignPaints: (models: BikeModels, model: string) => void;
   onBind: (bike: string, model: string, sound: string) => void;
   onUnbind: (bike: string, model: string, sound: string) => void;
+  /** A model set moved or went to the Trash — rescan. */
+  onChanged: () => void;
 }) {
   const t = useT();
   const { bike, models, sounds } = row;
@@ -470,6 +545,9 @@ function BikeCard({
                   ? () => onPreview(bike, v.name)
                   : undefined
               }
+              manage={{ bike, onChanged }}
+              paintCount={v.paints.length}
+              onAssignPaints={() => onAssignPaints(models, v.name)}
             />
           ))}
         </SwapSection>
@@ -548,6 +626,9 @@ function VariantButton({
   boundModels = [],
   onClick,
   onPreview,
+  paintCount = 0,
+  onAssignPaints,
+  manage,
 }: {
   variant: ModelVariant | SoundVariant;
   kind: "model" | "sound";
@@ -557,6 +638,12 @@ function VariantButton({
   onClick: () => void;
   /** Show this set in 3D without switching to it. Models only. */
   onPreview?: () => void;
+  /** How many liveries this model claims. Models only. */
+  paintCount?: number;
+  /** Choose which liveries belong to this model. Models only. */
+  onAssignPaints?: () => void;
+  /** Move / delete this model set. Models only — a sound set is managed elsewhere. */
+  manage?: { bike: string; onChanged: () => void };
 }) {
   const t = useT();
   // A model row named "Stock" is the game's own model, packed in the bike's `.pkz` —
@@ -578,7 +665,17 @@ function VariantButton({
   const applicable = v.valid || v.empty;
   const selectable = !v.active && applicable && !disabled;
   return (
-    <div className="relative">
+    <div
+      className={cn(
+        "flex items-center gap-1 rounded-lg border pr-1.5 transition-colors",
+        v.active
+          ? "border-primary/60 bg-primary/10"
+          : applicable
+            ? "border-white/[0.07] hover:border-white/20"
+            : "border-white/[0.05] opacity-50",
+        disabled && !v.active && "pointer-events-none opacity-60",
+      )}
+    >
       <button
         disabled={!selectable}
         onClick={onClick}
@@ -596,14 +693,8 @@ function VariantButton({
                 : t("locker.switchTo", { name: v.name })
         }
         className={cn(
-          "flex w-full items-center gap-2 rounded-lg border px-3 py-2.5 text-left transition-colors",
-          onPreview && "pr-10",
-          v.active
-            ? "border-primary/60 bg-primary/10"
-            : applicable
-              ? "cursor-pointer border-white/[0.07] hover:border-white/20"
-              : "border-white/[0.05] opacity-50",
-          disabled && !v.active && "pointer-events-none opacity-60",
+          "flex min-w-0 flex-1 items-center gap-2 rounded-l-lg px-3 py-2.5 text-left",
+          selectable && "cursor-pointer",
         )}
       >
         <span className="flex size-4 flex-none items-center justify-center">
@@ -636,6 +727,15 @@ function VariantButton({
               : v.empty
                 ? emptyLabel
                 : t("swaps.fileCount", { count: v.fileCount })}
+            {paintCount > 0 && (
+              <span
+                className="flex items-center gap-0.5 text-foreground/45"
+                title={t("locker.paintsClaimed", { count: paintCount })}
+              >
+                <Palette className="size-3" />
+                {paintCount}
+              </span>
+            )}
             {boundModels.length > 0 && (
               <span
                 className="flex items-center gap-0.5 text-primary/70"
@@ -648,17 +748,39 @@ function VariantButton({
           </span>
         </span>
       </button>
-      {/* Outside the swap button, not nested in it: previewing must never switch the
-          model by accident, and a button inside a button isn't valid markup either. */}
+      {/* Siblings of the swap button, never nested in it: opening the livery picker or a
+          preview must not switch the model by accident, and a button inside a button isn't
+          valid markup either. */}
+      {onAssignPaints && (
+        <button
+          onClick={onAssignPaints}
+          title={t("locker.assignPaints", { name: v.name })}
+          className={cn(
+            "flex flex-none items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] transition-colors hover:bg-white/[0.07] hover:text-foreground",
+            paintCount > 0 ? "text-foreground/60" : "text-muted-foreground",
+          )}
+        >
+          <Palette className="size-3.5" />
+          {t("locker.paints")}
+        </button>
+      )}
       {onPreview && (
         <button
           onClick={onPreview}
           title={t("locker.preview3d", { name: v.name })}
-          aria-label={t("locker.preview3d", { name: v.name })}
-          className="absolute right-1.5 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-white/[0.07] hover:text-foreground"
+          className="flex flex-none items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-white/[0.07] hover:text-foreground"
         >
           <Box className="size-3.5" />
+          {t("locker.view3d")}
         </button>
+      )}
+      {manage && kind === "model" && (
+        <ModelSwapActions
+          bike={manage.bike}
+          variant={v as ModelVariant}
+          onChanged={manage.onChanged}
+          className="px-1.5 py-1.5"
+        />
       )}
     </div>
   );
