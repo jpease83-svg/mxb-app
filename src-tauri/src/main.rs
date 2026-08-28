@@ -5497,7 +5497,7 @@ fn live_sync_session(app: &tauri::AppHandle, address: Option<String>) {
     tauri::async_runtime::spawn(async move {
         let started = std::time::Instant::now();
         let mut seen_running = false;
-        let mut observed_server: Option<String> = None;
+        let mut observed_server: Option<(String, String)> = None;
         let mut next_periodic_pull = std::time::Instant::now() + LIVE_SYNC_EVERY;
         loop {
             // A direct-address launch already knows its server, so it needs only the normal
@@ -5523,7 +5523,9 @@ fn live_sync_session(app: &tauri::AppHandle, address: Option<String>) {
             }
 
             let session_server = (address.is_none() && gameproc::is_game_running())
-                .then(|| frostmod::session_state(&cfg).map(|s| s.server_name))
+                .then(|| {
+                    frostmod::session_state(&cfg).map(|s| (s.server_name, s.track_id))
+                })
                 .flatten();
             let session_changed = session_server.is_some() && session_server != observed_server;
             observed_server = session_server;
@@ -5595,16 +5597,15 @@ async fn pull_rosters(
 
     let keys: Vec<String> = match &address {
         Some(addr) => vec![paintsync::server_key_for(&registry, addr)],
-        None => match session
-            .as_ref()
-            .and_then(|s| paintsync::server_key_for_name(&registry, &s.server_name))
-        {
-            Some(key) => {
-                log::debug!("[sync] FrostMod session matched registered server {key}");
-                vec![key]
+        None => match session.as_ref() {
+            Some(s) => {
+                let key = paintsync::server_key_for_name(&registry, &s.server_name)
+                    .or_else(|| paintsync::session_server_key(&s.server_name, &s.track_id));
+                key.into_iter().collect()
             }
-            // No session yet, an unregistered server, or two registry rows with the same
-            // display name: the previous broad sync is the safe fallback.
+            // Before FrostMod reports a live session, keep the manual Sync button's old
+            // broad behavior. Once connected, even an unregistered community host receives
+            // an exact roster key and no server-side agent is required.
             None => registry.iter().map(|s| s.id.clone()).collect(),
         },
     };
