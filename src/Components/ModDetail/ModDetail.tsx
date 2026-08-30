@@ -84,6 +84,9 @@ function stageIndex(stage: InstallStage): number {
       return 2;
     case "placing":
       return 3;
+    // The bytes are down and classified; what is left is the user's decision, not ours.
+    case "review":
+      return 3;
     case "done":
       return 4;
     default:
@@ -347,6 +350,25 @@ export default function ModDetail({
             <h1 className="text-[24px] font-bold leading-tight tracking-[-0.3px]">
               {detail.title}
             </h1>
+            {/* Who made it, right under the name — the same byline the browse card carries.
+                Clickable through to their profile, which is where their other mods are. */}
+            {detail.author &&
+              (detail.authorUrl ? (
+                <button
+                  onClick={() => open(detail.authorUrl!)}
+                  className="flex cursor-default items-center gap-1 self-start text-[12.5px] text-primary hover:brightness-110"
+                  title={detail.authorUrl}
+                >
+                  <span className="truncate">
+                    {t("browse.byAuthor", { author: detail.author })}
+                  </span>
+                  <ExternalLink className="size-3 flex-none" />
+                </button>
+              ) : (
+                <span className="truncate text-[12.5px] text-muted-foreground">
+                  {t("browse.byAuthor", { author: detail.author })}
+                </span>
+              ))}
             <div className="flex flex-wrap items-center gap-2 text-[12px] text-muted-foreground">
               <span>{formatDate(detail.date)}</span>
               {detail.version && (
@@ -589,9 +611,11 @@ function InstallProgress({
         ? t("update.downloading")
         : stage === "extracting"
           ? t("modDetail.extracting")
-          : stage === "placing"
-            ? t("modDetail.addingToLibrary")
-            : t("modDetail.resolving");
+          : stage === "review"
+            ? t("modDetail.chooseWhatToInstall")
+            : stage === "placing"
+              ? t("modDetail.addingToLibrary")
+              : t("modDetail.resolving");
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-baseline justify-between">

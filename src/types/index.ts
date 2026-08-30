@@ -260,6 +260,11 @@ export interface ModDetail {
   images: string[];
   /** e.g. "Beta 19", when the page states it. */
   version: string | null;
+  /** Who the catalog credits the mod to, from the byline on its page. `null` when the
+   *  page carries none — same meaning as `ModSummary.author`. */
+  author: string | null;
+  /** The author's profile page on the catalog, for the byline link. */
+  authorUrl: string | null;
   downloads: DownloadOption[];
   /**
    * The post's category names ("2023 KTM 450 SX-F OEM", "Liveries", "KTM"). A livery is
@@ -710,6 +715,106 @@ export interface TrackTerrain {
   heights: Float32Array;
 }
 
+/**
+ * A track's scenery — what stands on the ground the terrain grid describes.
+ *
+ * Positions are world metres in the game's own left-handed frame, the same one the terrain
+ * grid is placed in, so the viewer mirrors X over both at once.
+ */
+export interface TrackScenery {
+  /** `3 * vertexCount`, world metres. */
+  positions: Float32Array;
+  /** `3 * vertexCount`, unit length. */
+  normals: Float32Array;
+  /** `2 * vertexCount`. Tiling, so these run well outside 0–1. */
+  uvs: Float32Array;
+  /** `3 * triangleCount`. Sorted so each material's triangles sit together. */
+  indices: Uint32Array;
+  /** One run of triangles per material. */
+  groups: TrackSceneryGroup[];
+  /** The surfaces the map paints those runs with. */
+  textures: TrackSceneryTexture[];
+  /**
+   * How many connected pieces the scenery comes apart into — one per tent, trailer or
+   * foliage card. The unit a designer picks, hides or moves.
+   */
+  pieceCount: number;
+  /** Which piece each triangle belongs to — turns a ray hit into a thing you can point at. */
+  pieceOfTriangle: Uint32Array;
+  /** World bounds, metres: `[minX, minY, minZ, maxX, maxY, maxZ]`. */
+  bounds: [number, number, number, number, number, number];
+}
+
+export interface TrackSceneryGroup {
+  material: number;
+  triStart: number;
+  triCount: number;
+}
+
+export interface TrackSceneryTexture {
+  /** Which material this paints. */
+  material: number;
+  width: number;
+  height: number;
+  /**
+   * An alpha cut-out — foliage, crowd, fencing. It has to be drawn with an alpha test:
+   * without one every leaf card is an opaque rectangle, and a treeline becomes a wall.
+   */
+  alpha: boolean;
+  /** `width * height * 4`, RGBA, first row first. */
+  pixels: Uint8Array<ArrayBuffer>;
+}
+
+/** A track's sky, its backdrop, and the light it sits under. */
+export interface TrackBackdrop {
+  /** Direction the sun comes from, as the track states it. */
+  sun: [number, number, number] | null;
+  skyColour: [number, number, number] | null;
+  sunColour: [number, number, number] | null;
+  ambientColour: [number, number, number] | null;
+  fogColour: [number, number, number] | null;
+  fogDensity: number | null;
+  /** The dome overhead, and the ring of land beyond the track. Either may be empty. */
+  sky: TrackMeshArrays;
+  backdrop: TrackMeshArrays;
+}
+
+/** Bare mesh arrays, in world metres. */
+export interface TrackMeshArrays {
+  positions: Float32Array;
+  normals: Float32Array;
+  uvs: Float32Array;
+  indices: Uint32Array;
+  /** The picture it carries. A sky dome is a few hundred triangles and one large image. */
+  picture: { width: number; height: number; pixels: Uint8Array<ArrayBuffer> } | null;
+}
+
+/**
+ * A tiling sheet of the track's own ground, and its relief.
+ *
+ * What the ground is made of, not what is where — tiled far finer than the third of a metre
+ * a track states its surface at.
+ */
+export interface TrackGround {
+  colour: TrackSceneryTexture;
+  /** Its normal map, where the track ships one under a ground name. */
+  normal: TrackSceneryTexture | null;
+}
+
+/** What a track pins to a point but ships no mesh for. Mirrors `scenery::Placement`. */
+export interface TrackPlacement {
+  /** A key, not prose — the UI translates it. */
+  kind: "prop" | "marshal" | "camera" | "sound";
+  /** The `.edf` for a prop, the `.wav` for a sound, otherwise the track's own name for it. */
+  name: string;
+  /** World metres, game frame. */
+  pos: [number, number, number];
+  /** Degrees, where the track states one. */
+  heading: number | null;
+  /** Full rotation in degrees, for props that carry one — what a `.scr` writes back. */
+  rot?: [number, number, number] | null;
+}
+
 /** What the dropzone decided a dropped item is. Mirrors `dropzone::ContentKind`. */
 export type DropKind =
   | "modsTree"
@@ -718,6 +823,9 @@ export type DropKind =
   | "bikePaint"
   | "soundSet"
   | "riderGear"
+  /** A tyre set (`mods/tyres`). Only ever comes out of a split pack — on its own a tyre
+   *  package says too little to be recognised. */
+  | "tyres"
   | "reshadePreset"
   | "unknown";
 
@@ -735,6 +843,8 @@ export type DropReason =
   | "riderTexture"
   | "gearTexture"
   | "reshadePreset"
+  /** The pack it arrived in filed it here. */
+  | "packLayout"
   | "unrecognised";
 
 export interface DropChoice {
@@ -812,7 +922,7 @@ export interface DropOutcome {
 
 /** Where a download's bytes came from: the mod site, a shop purchase, or a local file the
  *  user imported or dragged in. */
-export type DownloadSource = "site" | "shop" | "file";
+export type DownloadSource = "site" | "shop" | "hub" | "file";
 
 export type DownloadStatus = "installed" | "failed";
 
@@ -890,6 +1000,9 @@ export type InstallStage =
   | "downloading"
   | "extracting"
   | "placing"
+  /** The download held several mods and the user is picking which of them to install.
+   *  Nothing is written yet, and the queue lane has already moved on. */
+  | "review"
   | "done"
   | "error";
 
@@ -1393,6 +1506,43 @@ export interface ShopStatus {
   error: string | null;
 }
 
+/**
+ * MXB Hub — `shop.mxb-hub.com`, the marketplace `mxbhub.com` redirects to.
+ *
+ * Deliberately expressed as extensions of the shop's types rather than as a parallel set. The
+ * two stores sell the same kinds of thing to the same person, and the grid, the price tag, the
+ * purchase card and the detail page are shared between them — types that merely resembled each
+ * other would make every one of those a translation layer. What the Hub adds is a `slug` (its
+ * API is addressable by one, where the shop's dump is not) and a creator link.
+ */
+export interface HubMod extends ShopMod {
+  slug: string;
+}
+
+export interface HubModDetail extends ShopModDetail {
+  slug: string;
+  /** The store's own one-line summary — where a Hub listing says "in-game ready PKZ". */
+  summary: string | null;
+}
+
+export interface HubCategory extends ShopCategory {
+  /** The category's page on the store; also the creator's page, under `creators`. */
+  link: string | null;
+}
+
+export interface HubPage {
+  items: HubMod[];
+  total: number;
+  hasMore: boolean;
+  currency: string;
+}
+
+/**
+ * `relevance` is absent because the store rejects it — measured, not assumed. `onSale` is a
+ * filter here rather than an order, which is what the Store API actually offers.
+ */
+export type HubSort = "newest" | "popular" | "priceAsc" | "priceDesc" | "nameAsc";
+
 export type ShopSort =
   | "newest"
   | "recentlyUpdated"
@@ -1400,3 +1550,34 @@ export type ShopSort =
   | "priceDesc"
   | "onSale"
   | "nameAsc";
+
+/* ── Content lock ──────────────────────────────────────────────────────────────────── */
+
+/** One file a locking run would produce, or the reason it will be left alone. */
+export interface LockItem {
+  /** Where the file lands under each GUID folder — relative to the parent of the
+   *  selection it came from, so picking a folder keeps the folder. */
+  rel: string;
+  abs: string;
+  bytes: number;
+  /** A `.pkz` is locked as an archive; everything else as a single file. */
+  kind: "archive" | "file";
+  /** `null` when the file will be locked. */
+  skip: "junk" | "empty" | "protected" | null;
+}
+
+export interface LockOutcome {
+  guids: number;
+  files: number;
+  written: number;
+  skipped: number;
+  bytes: number;
+  outDir: string;
+}
+
+export interface LockProgress {
+  done: number;
+  total: number;
+  guid: string;
+  file: string;
+}

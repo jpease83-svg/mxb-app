@@ -45,6 +45,7 @@ export const it: Translation = {
   // ── Navigazione ────────────────────────────────────────────────────────────
   "nav.browse": "Esplora",
   "nav.shop": "Shop",
+  "nav.hub": "MXB Hub",
   "nav.library": "Libreria",
   "nav.downloads": "Download",
   "nav.locker": "Armadietto",
@@ -376,6 +377,8 @@ export const it: Translation = {
   // ── Visualizzatore 3D ──────────────────────────────────────────────────────
   "viewer.preview3d": "Anteprima 3D",
   "viewer.expand": "Ingrandisci",
+  "viewer.fullscreen": "Schermo intero",
+  "viewer.exitFullscreen": "Esci da schermo intero",
   "viewer.paint": "Grafica",
   "viewer.tyres": "Gomme",
   "viewer.tyresOwn": "Quelle della moto",
@@ -491,6 +494,26 @@ export const it: Translation = {
   "shop.sessionFailed": "Impossibile acquisire la tua sessione di MX Bikes Shop",
   "shop.loadFailed": "Impossibile caricare i tuoi acquisti: {{error}}",
   "shop.empty": "Nessun download acquistato trovato sul tuo account.",
+
+  // ── MXB Hub (shop.mxb-hub.com) ──
+  "hub.help":
+    "Esplora il marketplace MXB Hub su shop.mxb-hub.com e installa ciò che possiedi già. L'acquisto avviene sempre sul sito dello store; accedi in I miei acquisti per installare i tuoi ordini da qui.",
+  "hub.count_one": "{{count}} elemento",
+  "hub.count_other": "{{count}} elementi",
+  "hub.searchPlaceholder": "Cerca su MXB Hub…",
+  "hub.myDownloads": "I miei acquisti",
+  "hub.signInTitle": "Accedi a MXB Hub",
+  "hub.signInBody":
+    "Accedi a shop.mxb-hub.com per vedere e installare tutto ciò che possiedi, mod gratuite comprese. Apriamo il sito vero: la tua password non passa mai da questa app.",
+  "hub.signIn": "Accedi",
+  "hub.signedIn": "Accesso a MXB Hub effettuato",
+  "hub.sessionFailed": "Impossibile acquisire la tua sessione MXB Hub",
+  "hub.empty": "Nessun download trovato sul tuo account MXB Hub.",
+  "hubSort.newest": "Più recenti",
+  "hubSort.popular": "Più popolari",
+  "hubSort.priceAsc": "Prezzo: dal più basso",
+  "hubSort.priceDesc": "Prezzo: dal più alto",
+  "hubSort.nameAsc": "Nome (A–Z)",
   "purchases.count_one": "{{count}} acquisto",
   "purchases.count_other": "{{count}} acquisti",
   "purchases.fileCount_one": "{{count}} file",
@@ -572,6 +595,7 @@ export const it: Translation = {
   "installDialog.directFastest": "Diretto · il più veloce",
   "installDialog.direct": "Diretto",
   "installDialog.recommendedBadge": "Consigliato",
+  "installDialog.matchedBadge": "La tua moto",
   "installDialog.browserBadge": "Browser",
   "installDialog.serverBadge": "Server",
   "installDialog.serverBuildNote": "Build per server dedicato — non per giocare",
@@ -632,6 +656,7 @@ export const it: Translation = {
   "modDetail.addedToLibrary": "Aggiunta alla tua libreria",
   "modDetail.extracting": "Estrazione…",
   "modDetail.addingToLibrary": "Aggiunta alla libreria…",
+  "modDetail.chooseWhatToInstall": "Scegli cosa installare",
   "modDetail.resolving": "Risoluzione del download…",
   "modDetail.finishInBrowser": "Completa nel browser",
   "modDetail.viewOnSite": "Apri su {{site}}",
@@ -1225,6 +1250,7 @@ export const it: Translation = {
   "downloads.stageDownloading": "Download in corso",
   "downloads.stageExtracting": "Estrazione",
   "downloads.stagePlacing": "Installazione",
+  "downloads.stageReview": "In attesa di te",
 
   // ── Download (cronologia) ──────────────────────────────────────────────────
   "downloads.help":
@@ -1242,6 +1268,7 @@ export const it: Translation = {
   "downloads.yesterday": "Ieri",
   "downloads.sourceSite": "Download",
   "downloads.sourceShop": "Negozio",
+  "downloads.sourceHub": "MXB Hub",
   "downloads.sourceFile": "File importato",
   "downloads.showInLibrary": "Mostra nella libreria",
   "downloads.openModPage": "Apri la pagina della mod",
@@ -1378,6 +1405,32 @@ export const it: Translation = {
   "showcase.supporters.title_one": "Reso possibile da {{count}} sostenitore",
   "showcase.supporters.title_other": "Reso possibile da {{count}} sostenitori",
   "showcase.supporters.more": "+{{count}} altri",
+  "showcase.v0113.hero.title":
+    "Ogni pista si apre come il luogo che \u00e8",
+  "showcase.v0113.hero.body":
+    "Prima una pista si apriva come terreno nudo \u2014 i solchi, i paraboliche e le facce dei salti giusti, ma nulla sopra, cos\u00ec che un supercross e un circuito nazionale si somigliavano. Il visualizzatore ora disegna ci\u00f2 che una pista mette su di s\u00e9: le tende e le tettoie, le balle di paglia e i muri di gomme, le linee di striscioni e le recinzioni, i rimorchi del paddock e il paesaggio oltre il suo stesso quadrato.",
+  "showcase.v0113.sky":
+    "Una pista sta sotto il proprio cielo, illuminata e velata come dice il suo file di ambiente.",
+  "showcase.v0113.ground":
+    "Il terreno mantiene il dettaglio da vicino \u2014 la terra della pista stessa, con vero rilievo dove ne fornisce una normal map.",
+  "showcase.v0113.pick":
+    "Clicca qualsiasi cosa in piedi sulla pista e si illumina da sola, con nome e misure.",
+  "showcase.v0113.speed":
+    "Arriva a fasi \u2014 prima il terreno, poi la forma degli oggetti, poi i loro colori \u2014 e riaprire la stessa pista salta del tutto l\u2019archivio.",
+  "showcase.v0112.hero.title":
+    "Un pacchetto di moto si installa come le moto che contiene",
+  "showcase.v0112.hero.body":
+    "Il pacchetto OEM sono 54 macchine in un archivio da 3,8 GB, e finora arrivava come una sola riga con scritto \u201cCartella mods\u201d: tutto o niente. Ora \u00e8 elencato per com'\u00e8 fatto: ogni moto col suo nome e la sua classe, con la casella. Prendi le quattro con cui corri e lascia le altre cinquanta.",
+  "showcase.v0112.fullscreen":
+    "L'anteprima 3D del Designer si apre a schermo intero: un pulsante riempie la finestra con il modello che stai dipingendo.",
+  "showcase.v0112.review":
+    "Un download che si rivela contenere pi\u00f9 mod si ferma e ti mostra cosa c'\u00e8 dentro prima che qualcosa finisca nella cartella mods.",
+  "showcase.v0112.paint":
+    "Una livrea che offre un file per macchina installa ora quello della moto che hai scelto, non il primo della pagina.",
+  "showcase.v0112.speed":
+    "Il foglio di revisione si apre in circa un secondo con le moto OEM installate, dove prima ci metteva quasi venti.",
+  "showcase.v0112.window":
+    "Una finestra nera all'avvio non pu\u00f2 pi\u00f9 intrappolarti: resta nascosta finch\u00e9 non ha disegnato qualcosa e ha sempre un modo per essere chiusa.",
   "showcase.v0111.hero.title":
     "I model swap protetti si aprono in 3D",
   "showcase.v0111.hero.body":
@@ -1596,6 +1649,8 @@ export const it: Translation = {
   "drop.scanning": "Sto capendo di cosa si tratta…",
   "drop.found_one": "Trovato {{count}} elemento",
   "drop.found_other": "Trovati {{count}} elementi",
+  "drop.selectAll": "Seleziona tutto",
+  "drop.selectNone": "Deseleziona tutto",
   "drop.reviewHint": "Controlla le destinazioni, poi installa.",
   "drop.install_one": "Installa {{count}}",
   "drop.install_other": "Installa {{count}}",
@@ -1630,6 +1685,7 @@ export const it: Translation = {
   "drop.kind.bikePaint": "Grafica",
   "drop.kind.soundSet": "Suono",
   "drop.kind.riderGear": "Attrezzatura",
+  "drop.kind.tyres": "Pneumatici",
   "drop.kind.reshadePreset": "Preset ReShade",
   "drop.kind.unknown": "Sconosciuto",
   "drop.reason.modsTree": "Contiene una cartella mods completa",
@@ -1644,6 +1700,7 @@ export const it: Translation = {
   "drop.reason.riderTexture": "Colora il corpo del pilota — una tuta",
   "drop.reason.gearTexture": "Colora un pezzo di attrezzatura",
   "drop.reason.reshadePreset": "Elenca tecniche ReShade",
+  "drop.reason.packLayout": "Collocato qui dal pacchetto",
   "drop.reason.unrecognised": "Non riconosciuto — dovrai collocarlo tu",
 
   // ── Import (lo stesso flusso del rilascio, ma scegliendo) ──────────────────
@@ -1801,10 +1858,19 @@ export const it: Translation = {
 
   // ── Designer (l'editor a livelli) ─────────────────────────────────────────────
   "designer.help":
-    "Disegna una livrea sui fogli che il gioco legge davvero e guardala sul modello mentre lavori. Parti da una livrea installata per avere i nomi giusti dei fogli, dipingici sopra con pennello, sfumatura o forme, aggiungi immagini e testo, poi salva: quello che esce è un .pnt che il gioco carica, non un export da convertire.",
+    "Disegna una livrea sui fogli che il gioco legge davvero e guardala sul modello mentre lavori. Scegli un modello e i suoi fogli ci sono già, con i nomi che lui usa — oppure parti da una livrea installata o da un file di Photoshop per portarti dietro il lavoro. Dipingi con pennello, sfumatura o forme, aggiungi immagini e testo, poi salva: quello che esce è un .pnt che il gioco carica, non un export da convertire.",
   "designer.empty":
-    "Non c'è ancora niente su cui disegnare. Parti da una livrea installata per questo modello — così ottieni i suoi fogli e i loro nomi — oppure aggiungine uno vuoto.",
+    "Non c'è ancora niente su cui disegnare. Parti da una livrea installata per questo modello, apri un file di Photoshop per conservarne i livelli, oppure aggiungi un foglio vuoto.",
   "designer.startFromPaint": "Parti da una livrea…",
+  "designer.startFromPsd": "Parti da un PSD…",
+  "designer.exportPsd": "Esporta PSD",
+  "designer.exportPsdHint": "Salva ogni foglio come .psd a livelli, in una cartella scelta da te.",
+  "designer.exportedPsd_one": "1 foglio salvato in {{dir}}",
+  "designer.exportedPsd_other": "{{count}} fogli salvati in {{dir}}",
+  "designer.sheetsSwitched": "Passato ai fogli usati da {{dest}}.",
+  "designer.switchSheetsTitle": "Questi fogli sono di un altro modello",
+  "designer.switchSheetsBody": "{{dest}} usa {{names}}. Cambiando sostituisci tutti i fogli aperti.",
+  "designer.switchSheets": "Cambia fogli",
   "designer.blankSheet": "Foglio vuoto",
   "designer.addSheet": "Aggiungi un foglio",
   "designer.nothingToSave": "Ogni foglio è vuoto: disegna qualcosa prima di salvare.",
@@ -1941,6 +2007,12 @@ export const it: Translation = {
     "Solo le moto sanno dire quali texture sono le loro. Un casco indossa la vernice con cui è arrivato, e quella non è un aspetto originale da ricalcare.",
   "designer.stockNoMatch":
     "Questo modello non porta una texture sua chiamata “{{name}}”, quindi non c'è nulla della moto da mostrare sotto questa planche.",
+  "designer.stockAsBase": "Originale come base",
+  "designer.stockAsBaseHint":
+    "Dipinge la texture della moto stessa in questa planche a piena intensità — l'aspetto originale come punto di partenza, a un numero di distanza dall'essere una vernice. A differenza del riferimento qui sopra, questa fa parte di ciò che salvi.",
+  "designer.stockAsBaseDone":
+    "Ora “{{name}}” contiene la texture della moto stessa — mettici il tuo numero e salva.",
+  "designer.stockReadFailed": "Impossibile leggere la texture “{{name}}” del modello.",
   "designer.uvMap": "Mappa UV",
   "designer.uvHint":
     "Mostra dove finiscono su questa planche le carene del modello, ognuna con il suo colore.",
@@ -1996,6 +2068,18 @@ export const it: Translation = {
   "trackViewer.surface": "Surface",
   "trackViewer.surfaceMasks": "From the track's surface data",
   "trackViewer.relief": "Dislivello",
+  "trackViewer.objects": "Oggetti",
+  "trackViewer.painting": "Texture…",
+  "trackViewer.scenery": "Scenografia",
+  "trackViewer.sceneryTris": "{{count}} triangoli",
+  "trackViewer.fixtures": "Elementi segnalati",
+  "trackViewer.pieces": "Pezzi distinti",
+  "trackViewer.selected": "Pezzo scelto",
+  "trackViewer.place": "Posiziona un modello",
+  "trackViewer.placePick": "Scegli un modello, poi clicca il terreno.",
+  "trackViewer.placeHint": "Clicca il terreno per posarlo.",
+  "trackViewer.placedCount": "{{count}} posizionati",
+  "trackViewer.saveProps": "Salva .scr",
   "trackViewer.noTerrain": "Nessun terreno da mostrare",
   "trackViewer.noTerrainHint":
     "I dati di altezza di questo tracciato non sono in un formato che il visualizzatore sa ancora leggere.",
@@ -2046,4 +2130,41 @@ export const it: Translation = {
   "integrity.gridRecovered": "(prima, in questa sessione)",
   "integrity.gridNote":
     "Qui compaiono solo i piloti che usano MXB App con la condivisione attiva. Chi manca da questa lista non è stato scagionato: semplicemente non ha segnalato nulla.",
+  /* ── Protect ─────────────────────────────────────────────────────────── */
+  "nav.protect": "Protezione",
+  "protect.help": "Blocca i file che hai creato sui GUID di chi può caricarli. Un file bloccato si apre solo sull'installazione il cui GUID porta con sé, quindi un acquirente significa una copia: scegli i file una volta, incolla i GUID e ottieni una cartella per acquirente. I tuoi originali vengono solo letti.",
+  "protect.ownTitle": "Il tuo GUID",
+  "protect.ownDesc": "L'identità con cui MX Bikes ti riconosce. Non si trova in nessun file — è Steam a fornirlo all'accesso — quindi l'app lo legge dal gioco in esecuzione.",
+  "protect.ownUnknown": "Non ancora noto",
+  "protect.readOwn": "Leggi dal gioco",
+  "protect.copy": "Copia",
+  "protect.copied": "Copiato",
+  "protect.useMine": "Aggiungi alla lista",
+  "protect.ownFound": "Il tuo GUID è {{guid}}",
+  "protect.ownNotFound": "Impossibile leggere il tuo GUID",
+  "protect.ownNotFoundWhy": "Avvia MX Bikes e accedi a Steam, poi riprova.",
+  "protect.ownFailed": "Lettura del GUID non riuscita",
+  "protect.filesTitle": "File da bloccare",
+  "protect.filesDesc": "Aggiungi singoli file, oppure una cartella per prendere tutto ciò che contiene. Un .pkz viene bloccato come archivio; tutto il resto viene bloccato per conto proprio.",
+  "protect.addFiles": "Aggiungi file",
+  "protect.addFolder": "Aggiungi cartella",
+  "protect.clear": "Svuota",
+  "protect.summary": "{{files}} file · {{size}}",
+  "protect.summarySkipped": "{{count}} saltati",
+  "protect.planFailed": "Impossibile leggere la selezione",
+  "protect.skipJunk": "Saltato",
+  "protect.skipEmpty": "Vuoto",
+  "protect.skipProtected": "Già protetto",
+  "protect.guidsTitle": "Blocca per",
+  "protect.guidsDesc": "Un GUID per riga — esce una cartella per GUID. Ogni copia riceve la propria chiave, così due acquirenti non possono accorgersi di avere lo stesso file.",
+  "protect.guidsPlaceholder": "FF0110000108D7CFE3",
+  "protect.guidBad": "Non è un GUID — 18 caratteri esadecimali",
+  "protect.outTitle": "Dove metterli",
+  "protect.outDesc": "Qui viene creata una cartella per ogni GUID, con i file negli stessi percorsi che avevano. I tuoi originali non vengono toccati.",
+  "protect.outPlaceholder": "Scegli una cartella",
+  "protect.browse": "Sfoglia",
+  "protect.lock": "Blocca {{files}} file per {{guids}} GUID",
+  "protect.done": "Bloccati {{files}} file per {{guids}} GUID",
+  "protect.failed": "Blocco non riuscito",
+  "protect.showFolder": "Mostra cartella",
 };

@@ -14,12 +14,16 @@ mod downloads;
 mod dropzone;
 mod edf;
 mod fileshare;
+mod firstpaint;
 mod frostmod;
 mod frostmod_manage;
 mod game;
 mod gameproc;
+mod gate;
 mod gearrepair;
 mod heightfield;
+mod hub_clearance;
+mod hub_session;
 mod imgcache;
 mod install;
 mod ledger;
@@ -27,6 +31,7 @@ mod library;
 mod linkwalk;
 mod logs;
 mod lru;
+mod map;
 mod memwatch;
 mod modelswap;
 mod mods;
@@ -45,9 +50,12 @@ mod pkz;
 mod proton;
 #[cfg(sidecar)]
 mod sidecar;
+#[cfg(sidecar)]
+mod sidecar_lock;
 mod presets;
 mod paintsync;
 mod reshade;
+mod scenery;
 mod servers;
 mod sessionwatch;
 mod shop_catalog_session;
@@ -85,10 +93,13 @@ use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 /// The app window, as opposed to the transient ones the app opens alongside it (the
 /// overlay, the mxb-mods.com clearance check, the shop login). `tauri.conf.json` declares
 /// it without an explicit label, which is Tauri's default of `main`.
-const MAIN_WINDOW: &str = "main";
+pub(crate) const MAIN_WINDOW: &str = "main";
 
 /// The shop login WebView, opened on demand and closed once the session is captured.
 const SHOP_LOGIN_WINDOW: &str = "shop-login";
+/// The MXB Hub sign-in window. Transient like the shop's: it is the user typing a password
+/// into the store's own page, and it closes the moment the cookie appears.
+const HUB_LOGIN_WINDOW: &str = "hub-login";
 
 /// Whether closing this window should park it in the tray rather than destroy it.
 ///
@@ -100,6 +111,21 @@ const SHOP_LOGIN_WINDOW: &str = "shop-login";
 /// silently did nothing.
 fn parks_in_tray(label: &str) -> bool {
     label == MAIN_WINDOW
+}
+
+/// Whether closing the main window should park it in the tray instead of ending the app.
+///
+/// `painted` is the one that isn't a preference: a window that never painted has no close
+/// button in it, so parking it leaves the player nothing — the process stays alive holding
+/// the single-instance guard, and the next launch hands the same dead window straight back.
+///
+/// Never parks on Linux: the tray runs through libayatana-appindicator, which doesn't
+/// deliver click events to Tauri and isn't present at all on a stock GNOME desktop, so
+/// hiding there can strand the window with no way back. Never in a dev build either, or a
+/// `tauri dev` run would linger in the tray and block the next one.
+fn parks_on_close(painted: bool, run_in_background: bool) -> bool {
+    let tray_can_restore = cfg!(not(target_os = "linux"));
+    painted && run_in_background && tray_can_restore && !cfg!(debug_assertions)
 }
 
 /// Whether a window may make this IPC call.
@@ -1051,6 +1077,145 @@ async fn load_track_overview(
     .map_err(|e| format!("load_track_overview task failed: {e}"))
 }
 
+/// Where a track pins the things it ships no mesh for — marshal posts, TV cameras, crowd
+/// sound — plus the props its `.scr` places.
+///
+/// Split from the scenery mesh because it costs nothing: these files are kilobytes, so the
+/// viewer can mark them while the `.map` is still being read out of the archive.
+#[tauri::command]
+async fn read_track_placements(path: String) -> Result<Vec<scenery::Placement>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        scenery::read_placements(&path).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("read_track_placements task failed: {e}"))?
+}
+
+/// A track's scenery mesh — what stands on the ground the terrain grid describes.
+///
+/// Raw bytes for the same reason the terrain is: this is a few hundred thousand triangles,
+/// and as JSON numbers it would cost more to parse than the archive read that produced it.
+/// Empty rather than an error when a track carries no scenery, which is ordinary — the OEM
+/// drag strip declares none at all.
+#[tauri::command]
+async fn load_track_scenery(
+    app: tauri::AppHandle,
+    path: String,
+) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || match scenery::load(&app, &path) {
+        Ok(s) => tauri::ipc::Response::new(scenery::blob(&s)),
+        Err(e) => {
+            log::debug!("[scenery] {path}: {e:#}");
+            tauri::ipc::Response::new(Vec::new())
+        }
+    })
+    .await
+    .map_err(|e| format!("load_track_scenery task failed: {e}"))
+}
+
+/// A track's surfaces, fetched after its mesh is already on screen.
+///
+/// The second half of a two-stage load: the mesh parses in milliseconds, while inflating a
+/// map's sheets is hundreds of megabytes of work. Splitting them is the difference between a
+/// track appearing at once and a second of empty canvas.
+#[tauri::command]
+async fn load_track_surfaces(
+    app: tauri::AppHandle,
+    path: String,
+) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || match scenery::load_surfaces(&app, &path) {
+        Ok(t) => tauri::ipc::Response::new(scenery::surfaces_blob(&t)),
+        Err(e) => {
+            log::debug!("[scenery] surfaces for {path}: {e:#}");
+            tauri::ipc::Response::new(Vec::new())
+        }
+    })
+    .await
+    .map_err(|e| format!("load_track_surfaces task failed: {e}"))
+}
+
+/// What a track wraps itself in — its sky, its backdrop, and the light it sits under.
+///
+/// A dome is a few hundred triangles carrying one very large picture, so this is cheap next
+/// to the scenery and is what stops a track ending at a hard edge with nothing beyond it.
+#[tauri::command]
+async fn load_track_backdrop(
+    path: String,
+) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || match scenery::backdrop(&path) {
+        Ok((amb, sky, back)) => tauri::ipc::Response::new(scenery::backdrop_blob(&amb, &sky, &back)),
+        Err(e) => {
+            log::debug!("[scenery] backdrop for {path}: {e:#}");
+            tauri::ipc::Response::new(Vec::new())
+        }
+    })
+    .await
+    .map_err(|e| format!("load_track_backdrop task failed: {e}"))
+}
+
+/// A tiling sheet of a track's own ground, for detail finer than its data carries.
+///
+/// A track states its surface at about a third of a metre per sample, and a viewer that lets
+/// you get close magnifies that into a blur. This puts the grain back.
+#[tauri::command]
+async fn load_track_ground(
+    app: tauri::AppHandle,
+    path: String,
+) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let sheets = scenery::load_ground(&app, &path).unwrap_or_default();
+        tauri::ipc::Response::new(map::surfaces_blob(&sheets))
+    })
+    .await
+    .map_err(|e| format!("load_track_ground task failed: {e}"))
+}
+
+/// The models a track ships that a prop can be placed by name.
+#[tauri::command]
+async fn read_track_placeable(path: String) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        scenery::placeable(&path).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("read_track_placeable task failed: {e}"))?
+}
+
+/// One prop's mesh, so it can be drawn where it is about to go.
+#[tauri::command]
+async fn load_track_prop(
+    path: String,
+    name: String,
+) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || match scenery::prop_mesh(&path, &name) {
+        Ok(m) => tauri::ipc::Response::new(map::scenery_blob(&m, &[])),
+        Err(e) => {
+            log::debug!("[scenery] prop {name}: {e:#}");
+            tauri::ipc::Response::new(Vec::new())
+        }
+    })
+    .await
+    .map_err(|e| format!("load_track_prop task failed: {e}"))
+}
+
+/// Save a track's props to a `.scr` the game will load.
+///
+/// The `.scr` is the one part of a track that states where a thing goes in plain text, so it
+/// is where anything placed in the app has to end up. Writes only where it is told, never
+/// inside an archive, and refuses to replace a file unless asked — a track's own `.scr` is
+/// the record of however long someone spent placing things.
+#[tauri::command]
+async fn save_track_props(
+    target: String,
+    props: Vec<scenery::Placement>,
+    overwrite: bool,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        scenery::save_scr(&target, &props, overwrite).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("save_track_props task failed: {e}"))?
+}
+
 #[tauri::command]
 async fn unpack_paint(path: String) -> Result<Vec<paint::PaintTexture>, String> {
     tauri::async_runtime::spawn_blocking(move || unpack_paint_blocking(path))
@@ -1071,12 +1236,22 @@ fn paint_cache() -> &'static std::sync::Mutex<lru::Lru<Vec<paint::PaintTexture>>
     CACHE.get_or_init(|| std::sync::Mutex::new(lru::Lru::new(PAINT_CACHE_CAP)))
 }
 
+/// As [`cached_bike`], for the paints: looked up and released without holding the lock.
+fn cached_paint(key: &str) -> Option<Vec<paint::PaintTexture>> {
+    paint_cache().lock().ok().and_then(|mut c| c.get(key).cloned())
+}
+
 fn unpack_paint_blocking(path: String) -> Result<Vec<paint::PaintTexture>, String> {
     let t0 = std::time::Instant::now();
     // Path *and* mtime, as the bike cache does, so a paint re-saved under the same name misses.
     let key = bike_cache_key(&path);
-    if let Some(t) = paint_cache().lock().ok().and_then(|mut c| c.get(&key).cloned()) {
+    if let Some(t) = cached_paint(&key) {
         log::info!("unpack_paint {path}: cache hit ({:?})", t0.elapsed());
+        return Ok(t);
+    }
+    let _gate = gate::enter(&key);
+    if let Some(t) = cached_paint(&key) {
+        log::info!("unpack_paint {path}: cache hit, waited ({:?})", t0.elapsed());
         return Ok(t);
     }
 
@@ -1089,7 +1264,7 @@ fn unpack_paint_blocking(path: String) -> Result<Vec<paint::PaintTexture>, Strin
     );
     if let Ok(mut c) = paint_cache().lock() {
         // Cloning an entry copies names, sizes and tokens — never pixels, which stay in the
-        // texture store. The evicted paint's go with it; nothing else holds those tokens.
+        // texture store. The displaced paint's go with it; nothing else holds those tokens.
         if let Some(dropped) = c.insert(key, textures.clone()) {
             let tokens: Vec<String> = dropped.iter().map(|t| t.token.clone()).collect();
             texstore::release(&tokens);
@@ -1236,6 +1411,80 @@ async fn photo_save(request: tauri::ipc::Request<'_>) -> Result<String, String> 
     })
     .await
     .map_err(|e| format!("photo_save task failed: {e}"))?
+}
+
+/// How big a `.psd` this will open. A 4096² sheet with a couple of dozen layers is well
+/// inside this; the cap exists so a mistyped path at a 4 GB video doesn't try to cross the
+/// IPC channel as one allocation.
+const PSD_LIMIT: u64 = 512 * 1024 * 1024;
+
+/// The bytes of a `.psd`, for the Designer to take apart in the webview.
+///
+/// Parsing happens up there rather than here, because that is where the pixels have to end
+/// up: a layer becomes an `ImageBitmap` on a canvas, and a Rust-side decode would only mean
+/// re-encoding every layer to cross back. So this is the whole of the backend's part —
+/// hand over the file.
+///
+/// Restricted to the two Photoshop extensions on purpose. Nothing else has any business
+/// being read wholesale into the webview, and a command that would do it for any path is a
+/// wider door than this feature needs.
+#[tauri::command]
+async fn psd_read(path: String) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = std::path::PathBuf::from(&path);
+        let ok = path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("psd") || e.eq_ignore_ascii_case("psb"));
+        if !ok {
+            return Err(format!("{path:?} is not a .psd"));
+        }
+        let len = std::fs::metadata(&path).map_err(|e| format!("{path:?}: {e}"))?.len();
+        if len > PSD_LIMIT {
+            return Err(format!("{path:?} is {} MB — too large to open", len / (1024 * 1024)));
+        }
+        let bytes = std::fs::read(&path).map_err(|e| format!("{path:?}: {e}"))?;
+        Ok(tauri::ipc::Response::new(bytes))
+    })
+    .await
+    .map_err(|e| format!("psd_read task failed: {e}"))?
+}
+
+/// Write one sheet's `.psd` to a path the user picked.
+///
+/// Same shape as [`photo_save`], and for the same reason: a 4096² document with its layers
+/// still separate runs to tens of megabytes, so the file is the request body and the
+/// destination rides in a percent-encoded header.
+///
+/// Nothing is resolved or relocated — the dialog already asked. The extension is enforced so
+/// a typed name can't leave PSD bytes in a file Photoshop won't offer to open.
+#[tauri::command]
+async fn psd_save(request: tauri::ipc::Request<'_>) -> Result<String, String> {
+    let tauri::ipc::InvokeBody::Raw(psd) = request.body() else {
+        return Err("psd_save expects the PSD bytes as the request body".into());
+    };
+    let raw = request
+        .headers()
+        .get("x-dest")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    let dest = percent_encoding::percent_decode_str(raw).decode_utf8_lossy().into_owned();
+    if dest.is_empty() {
+        return Err("psd_save needs a destination".into());
+    }
+    let psd = psd.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut path = std::path::PathBuf::from(&dest);
+        if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case("psd")) {
+            path.set_extension("psd");
+        }
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| format!("{dir:?}: {e}"))?;
+        }
+        std::fs::write(&path, &psd).map_err(|e| format!("{path:?}: {e}"))?;
+        Ok(path.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|e| format!("psd_save task failed: {e}"))?
 }
 
 /// The file a save would write, resolved but not written — so the UI can ask before
@@ -1641,6 +1890,12 @@ fn bike_cache() -> &'static std::sync::Mutex<lru::Lru<BikeModel>> {
     CACHE.get_or_init(|| std::sync::Mutex::new(lru::Lru::new(BIKE_CACHE_CAP)))
 }
 
+/// The cached bike under `key`, if it's still resident. Taken and released in one step so
+/// no caller holds the cache lock while it waits on [`gate::enter`].
+fn cached_bike(key: &str) -> Option<BikeModel> {
+    bike_cache().lock().ok().and_then(|mut c| c.get(key).cloned())
+}
+
 fn mtime_nanos(path: &std::path::Path) -> u128 {
     std::fs::metadata(path)
         .and_then(|m| m.modified())
@@ -1740,8 +1995,15 @@ fn preview_model_swap_blocking(
         tyres_stamp(&tyres),
         pick.as_deref().unwrap_or(""),
     );
-    if let Some(m) = bike_cache().lock().ok().and_then(|mut c| c.get(&key).cloned()) {
+    if let Some(m) = cached_bike(&key) {
         log::info!("preview_model_swap {label}: cache hit ({:?})", t0.elapsed());
+        return Ok(m);
+    }
+    // Somebody may already be building this exact preview — the panel and a dialog can both
+    // be drawing it. Wait for them and take their answer instead of paying a second time.
+    let _gate = gate::enter(&key);
+    if let Some(m) = cached_bike(&key) {
+        log::info!("preview_model_swap {label}: cache hit, waited ({:?})", t0.elapsed());
         return Ok(m);
     }
 
@@ -1833,8 +2095,13 @@ fn load_bike_model_blocking(
         tyres.as_deref().map(tyres_stamp).unwrap_or(0),
         pick.as_deref().unwrap_or(""),
     );
-    if let Some(m) = bike_cache().lock().ok().and_then(|mut c| c.get(&key).cloned()) {
+    if let Some(m) = cached_bike(&key) {
         log::info!("load_bike_model {source}: cache hit ({:?})", t0.elapsed());
+        return Ok(m);
+    }
+    let _gate = gate::enter(&key);
+    if let Some(m) = cached_bike(&key) {
+        log::info!("load_bike_model {source}: cache hit, waited ({:?})", t0.elapsed());
         return Ok(m);
     }
 
@@ -2165,7 +2432,8 @@ fn build_bike_model(
 
     let model = BikeModel { nodes, paints, base: model_base, tyres, assembled, rig };
     if let Ok(mut c) = bike_cache().lock() {
-        // The evicted bike's pixels go with it — nothing else references them.
+        // The pixels of whatever this displaced go with it — evicted or replaced in place,
+        // nothing else references them; tokens are minted per build.
         if let Some(dropped) = c.insert(key, model.clone()) {
             texstore::release(&dropped.tokens());
         }
@@ -4456,6 +4724,14 @@ fn read_paint_file(dir: &std::path::Path, paint: &str) -> Option<Vec<u8>> {
     std::fs::read(first).ok()
 }
 
+/// Download a mod and install it.
+///
+/// Answers `null` for the ordinary case — one mod, downloaded and placed. A download that
+/// turns out to be a *pack* (several mods in one self-describing tree, like the OEM bike
+/// pack's 54 bikes and its tyre set) answers with a plan instead, and nothing has been
+/// written yet: the caller puts it up for review and commits it through `commit_drop`,
+/// exactly as it would a dropped file. Until then the plan owns the staged bytes, and
+/// `cancel_drop` is what frees them.
 #[tauri::command]
 async fn add_to_library(
     app: tauri::AppHandle,
@@ -4464,11 +4740,12 @@ async fn add_to_library(
     host: String,
     subpath: String,
     dest_folder: String,
-) -> Result<(), String> {
+) -> Result<Option<dropzone::DropPlan>, String> {
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
     let _cancel = cancel::begin(&slug);
     install::add_to_library(&app, &cfg, &slug, &url, &host, &subpath, &dest_folder)
         .await
+        .map(install::Placed::review)
         .map_err(|e| format!("{e:#}"))
 }
 
@@ -4630,6 +4907,24 @@ async fn uninstall_mod(app: tauri::AppHandle, from_path: String, subpath: String
 #[tauri::command]
 fn reveal_in_explorer(path: String) -> Result<(), String> {
     library::reveal_in_explorer(&path).map_err(|e| format!("{e:#}"))
+}
+
+/// Put a line from the webview into the app's own log file.
+///
+/// `tauri_plugin_log` writes what Rust logs; nothing the frontend prints to its console
+/// reaches the file a player sends us. Facts only the webview knows — which GPU its WebGL
+/// context landed on, say — would otherwise be invisible in exactly the report that needs
+/// them.
+#[tauri::command]
+fn log_client(level: String, message: String) {
+    // A log line is not a transport for arbitrary payloads. Trim rather than reject: a
+    // truncated fact still reads, and a dropped one is a support thread that goes nowhere.
+    let msg: String = message.chars().take(2000).collect();
+    match level.as_str() {
+        "error" => log::error!("[webview] {msg}"),
+        "warn" => log::warn!("[webview] {msg}"),
+        _ => log::info!("[webview] {msg}"),
+    }
 }
 
 /// Where MXB App's own logs are, where the game's are, and what's currently in each.
@@ -4904,6 +5199,77 @@ fn bike_preview_available() -> bool {
     cfg!(sidecar)
 }
 
+/// Whether this build can produce protected copies of a creator's files. Same shape as
+/// [`bike_preview_available`]: the optional local module carries the format, so a build
+/// without it hides the tool rather than offering one that can't do anything.
+#[tauri::command]
+fn content_lock_available() -> bool {
+    cfg!(sidecar)
+}
+
+/// What a run over `paths` would touch — every file under the selection, with the ones it
+/// would leave alone flagged and why. Folders are walked; a file is taken as itself.
+#[tauri::command]
+async fn content_lock_plan(paths: Vec<String>) -> Result<serde_json::Value, String> {
+    #[cfg(sidecar)]
+    {
+        let roots: Vec<std::path::PathBuf> =
+            paths.into_iter().map(std::path::PathBuf::from).collect();
+        let items = tauri::async_runtime::spawn_blocking(move || sidecar_lock::plan(&roots))
+            .await
+            .map_err(|e| format!("content_lock_plan task failed: {e}"))?
+            .map_err(|e| format!("{e:#}"))?;
+        return serde_json::to_value(items).map_err(|e| e.to_string());
+    }
+    #[cfg(not(sidecar))]
+    {
+        let _ = paths;
+        Err("this build can't lock content".into())
+    }
+}
+
+/// Write a copy of every file in `paths`, locked to each GUID in `guids`, under
+/// `out_dir/<GUID>/`. Reports progress on `content-lock://progress`.
+///
+/// The sources are only ever read. A creator's plaintext is the one thing they can't get
+/// back, so the tool that hands out locked copies is not also the tool that could eat the
+/// original.
+#[tauri::command]
+async fn content_lock_run(
+    app: tauri::AppHandle,
+    paths: Vec<String>,
+    guids: Vec<String>,
+    out_dir: String,
+) -> Result<serde_json::Value, String> {
+    #[cfg(sidecar)]
+    {
+        let roots: Vec<std::path::PathBuf> =
+            paths.into_iter().map(std::path::PathBuf::from).collect();
+        let out = std::path::PathBuf::from(out_dir);
+        let outcome = tauri::async_runtime::spawn_blocking(move || {
+            sidecar_lock::run(&app, &roots, &guids, &out)
+        })
+        .await
+        .map_err(|e| format!("content_lock_run task failed: {e}"))?
+        .map_err(|e| format!("{e:#}"))?;
+        return serde_json::to_value(outcome).map_err(|e| e.to_string());
+    }
+    #[cfg(not(sidecar))]
+    {
+        let _ = (app, paths, guids, out_dir);
+        Err("this build can't lock content".into())
+    }
+}
+
+/// This player's own MX Bikes GUID, read out of the running game.
+///
+/// `None` is the ordinary answer — the game isn't running, or hasn't reached Steam sign-in
+/// yet. See [`gameproc::local_guid`] for why it is never a guess.
+#[tauri::command]
+fn local_guid() -> Option<String> {
+    gameproc::local_guid()
+}
+
 /// The OS we're running on — `"windows"`, `"macos"`, `"linux"`.
 ///
 /// The frontend used to infer this from `navigator.userAgent`, which can tell a Mac from
@@ -4961,8 +5327,18 @@ fn autostart_action(wanted: bool, enabled: bool, stale: bool) -> Autostart {
     }
 }
 
-fn show_main(app: &tauri::AppHandle) {
-    if let Some(w) = app.get_webview_window("main") {
+/// The frontend has drawn its first frame — see [`firstpaint`].
+#[tauri::command]
+fn window_painted(app: tauri::AppHandle) {
+    firstpaint::mark(&app);
+}
+
+pub(crate) fn show_main(app: &tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window(MAIN_WINDOW) {
+        // Every path in — the tray, a second launch, the watchdog — can land here before
+        // the webview has painted, and an undecorated window with no frontend in it has
+        // nothing to close it by.
+        firstpaint::decorate_unpainted(&w);
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_focus();
@@ -6643,8 +7019,17 @@ async fn shop_install(
         let cfg = cfg.clone();
         let slug = item.slug.clone();
         let work = work.clone();
-        move || install::extract_and_place(&app, &cfg, &slug, &archive, &work, &subpath, &dest_folder)
-            .map(|()| dest_folder)
+        move || install::extract_and_place(
+            &app,
+            &cfg,
+            &slug,
+            &archive,
+            &work,
+            &subpath,
+            &dest_folder,
+            install::Packs::PlaceWhole,
+        )
+        .map(|_| dest_folder)
     })
     .await
     .map_err(|e| format!("shop_install task failed: {e}"))?;
@@ -6654,6 +7039,331 @@ async fn shop_install(
 
     // One place records what a purchase installed, so the badge is written on every path.
     let _ = dest_folder;
+    if let Ok(dir) = app.path().app_local_data_dir() {
+        if let Err(e) = shop_installed::record(&dir, &item.product, &names) {
+            log::warn!("could not record what {} installed: {e:#}", item.product);
+        }
+    }
+    Ok(())
+}
+
+// ─────────────────────────────────── MXB Hub ───────────────────────────────────
+//
+// shop.mxb-hub.com — the community marketplace `mxbhub.com` redirects to. Two halves, like
+// the shop: a public catalog anyone can browse, and the files this account owns.
+//
+// It is markedly simpler than the shop's equivalent because the store is not behind
+// Cloudflare (measured 2026-08-30: `server: nginx`, no `cf-ray`, no interstitial on
+// `/my-account/`). So there is no clearance to earn, no parked WebView reading pages out of
+// the DOM, and no `with_clearance` wrapper: `reqwest` talks to it directly, browsing needs no
+// credential at all, and the only window ever opened is the sign-in one.
+
+/// Run a hub read, and if the store answers with its robot challenge, solve it and try again.
+///
+/// The sibling of [`with_clearance`] above, and the difference is where the browser comes in.
+/// mxb-mods.com's fix is to move the *request* into a WebView and keep it there for the
+/// session, because Cloudflare judges the client. SiteGround judges the request rate and hands
+/// out a cookie once its script has run — so the browser is needed exactly once, and every
+/// request after it is an ordinary one again.
+async fn with_hub_clearance<T, F, Fut>(
+    app: &tauri::AppHandle,
+    what: &str,
+    op: F,
+) -> Result<T, String>
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<T>>,
+{
+    let err = match op().await {
+        Ok(value) => return Ok(value),
+        Err(err) => err,
+    };
+    if err.downcast_ref::<mods::Blocked>().is_none() {
+        log::warn!("{what} failed and a browser wouldn't help: {err:#}");
+        return Err(format!("{err:#}"));
+    }
+    log::info!("{what} hit the MXB Hub robot challenge — answering it in a browser");
+    if let Err(e) = hub_clearance::earn(app).await {
+        return Err(format!("{e:#}"));
+    }
+    op().await.map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+async fn hub_search(
+    app: tauri::AppHandle,
+    query: String,
+    category_id: Option<u64>,
+    page: u32,
+    sort: mods::hub::HubSort,
+    on_sale_only: bool,
+) -> Result<mods::hub::HubPage, String> {
+    with_hub_clearance(&app, "hub search", || {
+        mods::hub::search(&query, category_id, page, sort, on_sale_only)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn hub_categories(
+    app: tauri::AppHandle,
+) -> Result<Vec<mods::hub::HubCategory>, String> {
+    with_hub_clearance(&app, "hub categories", mods::hub::categories).await
+}
+
+#[tauri::command]
+async fn hub_detail(
+    app: tauri::AppHandle,
+    id: u64,
+) -> Result<mods::hub::HubModDetail, String> {
+    with_hub_clearance(&app, "hub detail", || mods::hub::detail(id)).await
+}
+
+#[tauri::command]
+fn hub_status(state: State<hub_session::HubSession>) -> bool {
+    state.logged_in()
+}
+
+#[tauri::command]
+async fn hub_logout(app: tauri::AppHandle) {
+    hub_session::clear_session(&app).await;
+}
+
+/// Open the store's own sign-in page and wait for the login cookie to appear.
+///
+/// The password is typed into WooCommerce's page, in a window of its own — the app never sees
+/// it, and never asks for it. What we take is the cookie the store sets afterwards.
+///
+/// Two things the shop's version has to do are deliberately absent. It clears the whole
+/// WebView's cookies first, because a stale `cf_clearance` there is worse than none; there is
+/// no Cloudflare here, and clearing is app-wide, so doing it would sign the user out of the
+/// *other* store on their way into this one. And it lands on `/robots.txt` to dodge a second
+/// challenge; this one can land on the account page, which is also the page that proves the
+/// sign-in worked.
+#[tauri::command]
+async fn hub_login(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(w) = app.get_webview_window(HUB_LOGIN_WINDOW) {
+        let _ = w.set_focus();
+        return Ok(());
+    }
+
+    // The account page, plainly. It is both the login form when signed out and the proof of a
+    // sign-in when not, so there is nothing to redirect to and no parameter worth inventing.
+    let target = format!("{base}/my-account/", base = hub_session::HUB_BASE);
+    let url = tauri::WebviewUrl::External(target.parse().map_err(|e| format!("{e}"))?);
+    let window = tauri::WebviewWindowBuilder::new(&app, HUB_LOGIN_WINDOW, url)
+        .title("Sign in to MXB Hub")
+        .inner_size(520.0, 760.0)
+        .build()
+        .map_err(|e| format!("{e:#}"))?;
+    let _ = window;
+
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        // ~5 minutes at 500 ms. Long enough for a password reset mid-flow; the user can retry.
+        let mut last_seen = Vec::new();
+        for _ in 0..600u32 {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            let Some(win) = app.get_webview_window(HUB_LOGIN_WINDOW) else {
+                // Closed by hand — a cancel, not a failure. Logged all the same, because "the
+                // user gave up" and "the app stopped watching" are indistinguishable later.
+                log::info!(
+                    "the MXB Hub login window was closed before sign-in finished (cookies: {})",
+                    hub_session::cookie_names(&last_seen)
+                );
+                return;
+            };
+            let cookies = hub_session::cookies_from_window(&win);
+            if !hub_session::is_authenticated(&cookies) {
+                last_seen = cookies;
+                continue;
+            }
+            let ok = match hub_session::set_session(&app, cookies) {
+                Ok(()) => {
+                    log::info!("captured MXB Hub session");
+                    true
+                }
+                Err(e) => {
+                    log::error!("failed to save the MXB Hub session: {e:#}");
+                    false
+                }
+            };
+            let _ = app.emit("hub-auth", ok);
+            let _ = win.close();
+            return;
+        }
+
+        log::warn!(
+            "MXB Hub sign-in did not complete within 5 minutes (cookies: {})",
+            hub_session::cookie_names(&last_seen)
+        );
+        let _ = app.emit("hub-auth", false);
+        // Closed rather than left up: nothing is watching it any more, so a sign-in finished
+        // afterwards would go unnoticed. Retry reopens it.
+        if let Some(win) = app.get_webview_window(HUB_LOGIN_WINDOW) {
+            let _ = win.close();
+        }
+    });
+    Ok(())
+}
+
+/// What this account owns, with its catalog entries alongside.
+///
+/// One command rather than the shop's two. A Hub download row links to its product page, so
+/// the catalog lookup is a single request keyed on exact slugs — where the shop has to fold
+/// product *names* together and match approximately, which is why its match is a separate
+/// call the grid makes after the fact. Doing both here means the grid renders once, complete,
+/// instead of popping in twice.
+///
+/// The listings are positional: `listings[i]` is `items[i]`'s catalog entry, or `null` where
+/// the product has since been unlisted. Best-effort — a catalog that won't answer costs the
+/// cards their artwork, not the list.
+#[tauri::command]
+async fn hub_my_downloads(
+    app: tauri::AppHandle,
+    state: State<'_, hub_session::HubSession>,
+) -> Result<HubDownloads, String> {
+    if !state.logged_in() {
+        return Err("Not signed in to MXB Hub.".to_string());
+    }
+    let mut items = with_hub_clearance(&app, "hub purchases", || {
+        // Re-read the client each attempt: answering the challenge rebuilds the signed-in one
+        // with the clearance folded in, and the stale handle would just be challenged again.
+        let client = state.client();
+        async {
+            let client = client.ok_or_else(|| anyhow::anyhow!("Not signed in to MXB Hub."))?;
+            mods::hubaccount::fetch_my_downloads(&app, &client).await
+        }
+    })
+    .await?;
+
+    let listings = match mods::hubaccount::match_products(&items).await {
+        Ok(found) => found,
+        Err(e) => {
+            log::warn!("could not match MXB Hub purchases to the catalog: {e:#}");
+            vec![None; items.len()]
+        }
+    };
+    // Mirrored onto the rows themselves as well, because a purchase is handed to the install
+    // queue on its own and has to still know what it is once the listing is out of scope.
+    for (item, found) in items.iter_mut().zip(&listings) {
+        let Some(found) = found else { continue };
+        item.image = found.image.clone();
+        item.author = found.author.clone();
+        item.category_id = found.category_ids.first().copied().unwrap_or(0) as u32;
+    }
+
+    Ok(HubDownloads { items, listings })
+}
+
+/// The purchases page and the catalog, joined, in one answer.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HubDownloads {
+    items: Vec<mods::hubaccount::HubItem>,
+    /// Positional against `items`.
+    listings: Vec<Option<mods::hub::HubMod>>,
+}
+
+/// Download a file this account owns and install it, to a destination the caller already chose.
+///
+/// The whole body after the client lookup is [`install`]'s — `download` streams with progress,
+/// resume and cancellation, and `extract_and_place` does what every other install does. That
+/// reuse is the point of the store having no Cloudflare in front of it: the shop needed a
+/// WebView download path ([`shop_fetch::download`]) precisely because its file URLs are
+/// challenged, and none of that is needed here.
+#[tauri::command]
+async fn hub_install(
+    app: tauri::AppHandle,
+    state: State<'_, hub_session::HubSession>,
+    item: mods::hubaccount::HubItem,
+    subpath: String,
+    dest_folder: String,
+) -> Result<(), String> {
+    let Some(session) = state.client() else {
+        return Err("Not signed in to MXB Hub.".to_string());
+    };
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    // Asked before the download: a track archive is several hundred megabytes to waste.
+    if cfg.mods_path.trim().is_empty() {
+        return Err("No MX Bikes folder is configured yet.".to_string());
+    }
+
+    let work = install::staging_dir("hub");
+    std::fs::create_dir_all(&work).map_err(|e| format!("{e:#}"))?;
+
+    let _cancel = cancel::begin(&item.slug);
+
+    // Where the bytes come from decides both the client and whether the link needs resolving.
+    //
+    // A store-issued `?download_file=` URL is authorised by the user's session, so it is
+    // fetched with it and is already a file. A handed-off link — MediaFire and friends, which
+    // WooCommerce allows for any product and MXB Hub uses for a number of its free mods — is
+    // fetched with the ordinary download client instead: sending the user's store cookies to a
+    // third party would be wrong whichever way it turned out. It also has to be resolved
+    // first, because a MediaFire *folder* is a web page listing files, not a file.
+    let fetch = async {
+        if item.external {
+            let client = install::build_download_client()?;
+            install::emit_resolving(&app, &item.slug);
+            let direct = install::resolve_direct_url(&client, &item.download_url, &item.host)
+                .await?;
+            install::download(&app, &client, &item.slug, &direct, &work).await
+        } else {
+            // A dead cookie doesn't 401 here — WooCommerce answers a link it won't honour with
+            // an HTML page, which `install::download` reports as "a web page instead of a
+            // file". Left as it is rather than translated: guessing "session expired" from a
+            // content type would sign the user out on a server hiccup.
+            install::download(&app, &session, &item.slug, &item.download_url, &work).await
+        }
+    };
+    let archive = match fetch.await {
+        Ok(path) => path,
+        Err(e) => {
+            let _ = std::fs::remove_dir_all(&work);
+            return Err(format!("{e:#}"));
+        }
+    };
+
+    // What identifies this purchase on disk afterwards. Both forms, because a `.pkz` is placed
+    // under its own file name while an archive that extracts lands in a folder named for its
+    // stem.
+    let names: Vec<String> = [archive.file_name(), archive.file_stem()]
+        .into_iter()
+        .flatten()
+        .map(|s| s.to_string_lossy().into_owned())
+        .collect();
+
+    let placed = tauri::async_runtime::spawn_blocking({
+        let app = app.clone();
+        let cfg = cfg.clone();
+        let slug = item.slug.clone();
+        let work = work.clone();
+        let subpath = subpath.clone();
+        let dest_folder = dest_folder.clone();
+        move || {
+            install::extract_and_place(
+                &app,
+                &cfg,
+                &slug,
+                &archive,
+                &work,
+                &subpath,
+                &dest_folder,
+                install::Packs::PlaceWhole,
+            )
+            .map(|_| ())
+        }
+    })
+    .await
+    .map_err(|e| format!("hub_install task failed: {e}"))?;
+
+    let _ = std::fs::remove_dir_all(&work);
+    placed.map_err(|e| format!("{e:#}"))?;
+
+    // Same record the shop's installs write, so both stores' grids get their badge from one
+    // place — it is a claim about a product name and the folders it put on disk, and nothing
+    // in it is specific to which store sold the thing.
     if let Ok(dir) = app.path().app_local_data_dir() {
         if let Err(e) = shop_installed::record(&dir, &item.product, &names) {
             log::warn!("could not record what {} installed: {e:#}", item.product);
@@ -7409,14 +8119,31 @@ fn webview_env_defaults(env: GraphicsEnv) -> Vec<(&'static str, &'static str)> {
 /// web process, and before any other thread exists — being `main`'s first statement gives
 /// both.
 fn prepare_webview_env() {
-    if !cfg!(target_os = "linux") {
-        return;
-    }
-    for (key, value) in webview_env_defaults(GraphicsEnv::read()) {
+    let env = GraphicsEnv::read();
+    let vars = if cfg!(target_os = "linux") {
+        webview_env_defaults(env)
+    } else if cfg!(windows) {
+        webview2_env_defaults(env)
+    } else {
+        Vec::new()
+    };
+    for (key, value) in vars {
         if std::env::var_os(key).is_none() {
             std::env::set_var(key, value);
         }
     }
+}
+
+/// The environment WebView2 should start under.
+///
+/// Nothing by default — WebView2 paints on virtually every Windows machine. `MXB_SAFE_GRAPHICS=1`
+/// takes the GPU out of it, which is the lever to pull for a window that came up black and
+/// stayed that way: a first frame that never arrives is the GPU path failing.
+fn webview2_env_defaults(env: GraphicsEnv) -> Vec<(&'static str, &'static str)> {
+    if !env.safe_mode {
+        return Vec::new();
+    }
+    vec![("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "--disable-gpu")]
 }
 
 /// Whether this process is running under Wine — CrossOver, Whisky, Kegworks or plain Wine.
@@ -7548,6 +8275,7 @@ fn main() {
         .manage(LookWatcher::default())
         .manage(CloudServers::default())
         .manage(shop_session::ShopSession::default())
+        .manage(hub_session::HubSession::default())
         .manage(voice::Monitor::default())
         .manage(voice::session::Session::default())
         .setup(|app| {
@@ -7570,12 +8298,24 @@ fn main() {
                 .filter(|w| w.label == MAIN_WINDOW)
             {
                 let mut builder =
-                    tauri::WebviewWindowBuilder::from_config(app.handle(), window_config)?;
+                    tauri::WebviewWindowBuilder::from_config(app.handle(), window_config)?
+                        // Also what puts the window on screen: it is hidden until the
+                        // document is there to show, and a hidden webview never composites
+                        // — so waiting for a painted frame here would wait forever.
+                        .on_page_load(|window, payload| {
+                            log::info!("[startup] main window {:?}", payload.event());
+                            if payload.event() == tauri::webview::PageLoadEvent::Finished {
+                                firstpaint::loaded(window.app_handle());
+                            }
+                        });
                 if !drag_drop {
                     builder = builder.disable_drag_drop_handler();
                 }
                 builder.build()?;
             }
+            // The window is built hidden and revealed by `window_painted`; this is what
+            // rescues it when that never arrives.
+            firstpaint::arm(app.handle());
             // Cloudflare scores the User-Agent alongside the IP, and a cf_clearance is bound
             // to the UA that earned it — a log about a block should say which one was used.
             log::info!("{} user-agent: {}", mxb_session::site().domain, mxb_session::UA);
@@ -7593,6 +8333,12 @@ fn main() {
                     on("WEBKIT_DISABLE_DMABUF_RENDERER"),
                     on("WEBKIT_DISABLE_COMPOSITING_MODE"),
                     on("LIBGL_ALWAYS_SOFTWARE"),
+                );
+            }
+            if cfg!(windows) {
+                log::info!(
+                    "webview env: webview2_args={:?}",
+                    std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS").unwrap_or_default(),
                 );
             }
             if let Ok(dir) = app.path().app_local_data_dir() {
@@ -7748,6 +8494,7 @@ fn main() {
             // There is nothing to press: the supervisor is the whole of "joining a room".
             voice::session::start(handle);
             shop_session::load_session(handle);
+            hub_session::load_session(handle);
             shop_catalog_session::load(handle);
             mxb_session::load(handle);
             imgcache::start_maintenance(handle);
@@ -7783,14 +8530,16 @@ fn main() {
                     return;
                 }
                 let cfg = config::load(window.app_handle()).unwrap_or_default();
-                // Never on Linux: the tray runs through libayatana-appindicator, which
-                // doesn't deliver click events to Tauri and isn't present at all on a
-                // stock GNOME desktop. Hiding there can strand the window with no way
-                // back, so closing closes.
-                let tray_can_restore = cfg!(not(target_os = "linux"));
-                if cfg.run_in_background && tray_can_restore && !cfg!(debug_assertions) {
+                let painted = firstpaint::painted();
+                if parks_on_close(painted, cfg.run_in_background) {
                     api.prevent_close();
                     let _ = window.hide();
+                } else if !painted {
+                    log::warn!(
+                        "[startup] closing a main window that never painted — quitting \
+                         rather than parking it in the tray"
+                    );
+                    frostmod_manage::stop(&window.app_handle().state::<FrostmodProcess>());
                 }
             }
         })
@@ -7800,6 +8549,7 @@ fn main() {
             // The macro is generic over the runtime; naming `Wry` here is what lets the
             // wrapper below infer what it is wrapping.
             let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
+            window_painted,
             is_configured,
             get_config,
             create_config,
@@ -7816,11 +8566,23 @@ fn main() {
             read_track_info,
             load_track_terrain,
             load_track_overview,
+            load_track_scenery,
+            load_track_surfaces,
+            read_track_placements,
+            save_track_props,
+            read_track_placeable,
+            load_track_prop,
+            load_track_backdrop,
+            load_track_ground,
             diagnose_track,
             unpack_paint,
             texture_bytes,
             watch_paint_files,
             unpack_pkz,
+            content_lock_available,
+            content_lock_plan,
+            content_lock_run,
+            local_guid,
             load_bike_model,
             preview_model_swap,
             load_rider_model,
@@ -7833,6 +8595,8 @@ fn main() {
             paint_studio_pixels,
             paint_studio_stage,
             photo_save,
+            psd_read,
+            psd_save,
             paint_studio_target,
             paint_studio_save,
             paint_studio_extract,
@@ -7871,6 +8635,7 @@ fn main() {
             move_mod,
             uninstall_mod,
             reveal_in_explorer,
+            log_client,
             logs_info,
             share_logs,
             open_logs_folder,
@@ -7953,6 +8718,14 @@ fn main() {
             shop_match_catalog,
             shop_install,
             shop_installed_map,
+            hub_search,
+            hub_categories,
+            hub_detail,
+            hub_login,
+            hub_status,
+            hub_logout,
+            hub_my_downloads,
+            hub_install,
             record_download,
             download_history,
             forget_download,
@@ -8095,6 +8868,55 @@ mod webview_env_tests {
         assert_eq!(vars.len(), 1);
         assert!(vars.contains_key("WEBKIT_DISABLE_DMABUF_RENDERER"));
     }
+
+    /// WebView2 paints on virtually every Windows machine, and forcing software rendering
+    /// on all of them to cure the few would be a bad trade.
+    #[test]
+    fn windows_is_left_alone_unless_safe_graphics_is_asked_for() {
+        assert!(webview2_env_defaults(GraphicsEnv::default()).is_empty());
+    }
+
+    /// The lever support has to pull for a window that came up black and stayed black.
+    #[test]
+    fn safe_graphics_takes_the_gpu_out_of_webview2() {
+        let vars: HashMap<_, _> = webview2_env_defaults(GraphicsEnv {
+            safe_mode: true,
+            ..GraphicsEnv::default()
+        })
+        .into_iter()
+        .collect();
+        assert_eq!(
+            vars.get("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"),
+            Some(&"--disable-gpu"),
+        );
+    }
+}
+
+/// The window that never painted is the one these are for: it has no close button drawn
+/// in it, so whatever the player does next has to actually get rid of it.
+#[cfg(test)]
+mod close_behaviour_tests {
+    use super::*;
+
+    /// The whole bug: Alt+F4 on a black window parked it in the tray, the process stayed
+    /// alive holding the single-instance guard, and reopening the app called `show_main`
+    /// and handed the same dead window back. Task Manager was the only way out.
+    #[test]
+    fn a_window_that_never_painted_never_parks_in_the_tray() {
+        assert!(!parks_on_close(false, true));
+        assert!(!parks_on_close(false, false));
+    }
+
+    /// And the setting still means what it says for a window that works.
+    #[test]
+    fn a_painted_window_still_honours_run_in_background() {
+        // Release builds on Windows and macOS park; this test binary is neither, so the
+        // assertion is on the platform-and-build gate agreeing with itself rather than on
+        // a fixed answer.
+        let parks = cfg!(not(target_os = "linux")) && !cfg!(debug_assertions);
+        assert_eq!(parks_on_close(true, true), parks);
+        assert!(!parks_on_close(true, false), "turning it off always closes for real");
+    }
 }
 
 #[cfg(test)]
@@ -8184,6 +9006,8 @@ mod window_tests {
             mxb_fetch::WINDOW,
             shop_fetch::WINDOW,
             SHOP_LOGIN_WINDOW,
+            HUB_LOGIN_WINDOW,
+            hub_clearance::WINDOW,
             overlay::LABEL, // handled earlier by its own branch, but never by this one
         ] {
             assert!(
@@ -8234,7 +9058,7 @@ mod window_tests {
     /// their capability files grant.
     #[test]
     fn the_apps_own_windows_are_unaffected_by_the_guard() {
-        for label in [MAIN_WINDOW, overlay::LABEL, SHOP_LOGIN_WINDOW] {
+        for label in [MAIN_WINDOW, overlay::LABEL, SHOP_LOGIN_WINDOW, HUB_LOGIN_WINDOW] {
             for command in ["create_config", "install_mod", "plugin:event|emit"] {
                 assert!(ipc_allowed(label, command), "{label} / {command}");
             }
