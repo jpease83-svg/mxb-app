@@ -301,6 +301,15 @@ export function isServerKey(value: unknown): value is string {
 
 
 /**
+ * How long a presence heartbeat counts for before the rider is treated as gone.
+ *
+ * Shared rather than per-caller: the paint roster and the voice room both decide who is on a
+ * server from the same rows, and two answers to "is this rider still here" would be one bug
+ * waiting for the day the numbers drifted apart.
+ */
+export const PRESENCE_TTL_MS = 10 * 60 * 1000;
+
+/**
  * Verdicts a client may report, worst last.
  *
  * `unknown` is a real answer and not an error: it is what a client says when it could not

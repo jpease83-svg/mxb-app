@@ -12,6 +12,12 @@ pub const UA: &str = "mxb-app";
 /// `frostmod.exe` beside an old `frostmod.dll` is a worse state than not updating.
 const BINARIES: [&str; 2] = ["frostmod.exe", "frostmod.dll"];
 
+/// PiBoSo loads output plugins from `<game>/plugins/*.dlo`. FrostMod's DLL already exports
+/// that interface, and plugin mode is what gives paint sync the joined server name and local
+/// GUID without reading game memory. The bytes are identical; only the extension and folder
+/// tell MX Bikes to load them during startup.
+const OUTPUT_PLUGIN: &str = "frostmod.dlo";
+
 /// Marks a binary moved aside because something still had it open. Swept on the
 /// next install or start, by which point whatever held it has usually exited.
 const RETIRED_MARK: &str = ".in-use-";
@@ -47,6 +53,11 @@ pub struct FrostmodStatus {
     /// which machines inject fine, and refusing to launch would take FrostMod away from
     /// anyone the detection is wrong about. It's a warning with a fix attached.
     pub missing_runtimes: Vec<crate::vcruntime::Runtime>,
+    /// A loose `msvcr90.dll` beside the game exe that we didn't remove. `Clear`/`Removed`
+    /// mean there is nothing to say; the other two mean the game will die with R6034 the
+    /// next time something plain-imports the CRT, and only the player can authorise the
+    /// fix — see `crate::vcruntime::disable_stray_msvcr90`.
+    pub stray_msvcr90: crate::vcruntime::Stray,
 }
 
 /// The folder we install FrostMod into and run it from — so also where anything it
@@ -66,6 +77,56 @@ fn exe_path(app: &AppHandle) -> PathBuf {
 
 fn version_path(app: &AppHandle) -> PathBuf {
     frostmod_dir(app).join("version.txt")
+}
+
+/// Keep FrostMod's supported output-plugin copy beside MX Bikes.
+///
+/// Best-effort at call sites because injection remains a valid reload path when the game
+/// folder is not writable. A staged swap keeps an interrupted update from leaving a partial
+/// plugin, while a loaded old copy is moved aside and reported as needing a game restart.
+fn ensure_output_plugin(
+    app: &AppHandle,
+    cfg: &crate::config::AppConfig,
+    version: Option<&str>,
+) -> anyhow::Result<bool> {
+    if cfg.active_game != crate::game::Game::Mxb {
+        return Ok(false);
+    }
+    // v0.13 and older launchers only look for `frostmod.dll`, not the `.dlo` module MX
+    // Bikes has already loaded. Copying one of those builds into plugins would make its
+    // launcher inject a second copy. The bridge and that launcher fix ship together.
+    if !crate::frostmod::session_bridge_is_safe(version) {
+        return Ok(false);
+    }
+    let install = cfg.install_dir();
+    if install.trim().is_empty() {
+        anyhow::bail!("MX Bikes install folder is not configured");
+    }
+    let source = frostmod_dir(app).join("frostmod.dll");
+    if !source.is_file() {
+        anyhow::bail!("FrostMod DLL is not installed");
+    }
+    let plugins = PathBuf::from(install).join("plugins");
+    std::fs::create_dir_all(&plugins)?;
+    let target = plugins.join(OUTPUT_PLUGIN);
+
+    // Avoid touching a loaded image — and avoid a restart warning — when it already holds
+    // the exact build the app manages.
+    let source_bytes = std::fs::read(&source)?;
+    if std::fs::read(&target).ok().as_deref() == Some(source_bytes.as_slice()) {
+        return Ok(false);
+    }
+
+    let game_was_running = crate::gameproc::is_game_running();
+    let staged = plugins.join(format!("{OUTPUT_PLUGIN}.mxbapp-new"));
+    std::fs::write(&staged, source_bytes)?;
+    let retired = swap_in(&target, &staged).map_err(|e| locked_file_error(OUTPUT_PLUGIN, &e))?;
+    let needs_restart = retired
+        .as_ref()
+        .is_some_and(|old| std::fs::remove_file(old).is_err());
+    // A newly created plugin is not discovered by an already-running game even when there
+    // was no old file to retire, so that case also needs an honest restart indicator.
+    Ok(needs_restart || game_was_running)
 }
 
 /// FrostMod's server-browser filter file (its stock default hides Kaizo).
@@ -226,21 +287,25 @@ pub async fn status(app: &AppHandle) -> FrostmodStatus {
     let supported_for_game =
         crate::frostmod::supported_for_game(active_game, version.as_deref());
 
-    // The game folder is what makes the VC90 answer mean anything: it's both where a copy
-    // of the CRT may already sit and the only place we can put one. `install_dir` hands
-    // back an empty string for "don't know", which must not become the path `""`.
+    // The game folder is what makes the VC90 answer mean anything: it's where a copy of the
+    // CRT may sit, and where a stray one has to be cleaned out of. `install_dir` hands back
+    // an empty string for "don't know", which must not become the path `""`.
     let game_dir = cfg
         .as_ref()
         .map(|c| c.install_dir())
         .filter(|d| !d.trim().is_empty())
         .map(PathBuf::from);
 
-    // Lay the CRT beside the exe if it isn't there yet. This is the half of the VC90 story
-    // the redistributable cannot do — see `crate::vcruntime` — and doing it here means a
-    // player never has to learn the difference between the two failures to be past them.
-    if let Some(dir) = game_dir.as_deref() {
-        crate::vcruntime::ensure_app_local_msvcr90(dir);
-    }
+    // Take back the loose `msvcr90.dll` versions 0.9.2–0.10.0 laid beside the exe. It kills
+    // the game with R6034 — see `crate::vcruntime` — and the status poll is the only thing
+    // that reaches a player who never opens Settings, so the cleanup rides along here.
+    //
+    // Its verdict travels on: what the sweep declines to delete is still a file that stops
+    // the game dead, and reporting it is the only way the player ever learns why.
+    let stray_msvcr90 = game_dir
+        .as_deref()
+        .map(crate::vcruntime::remove_stray_msvcr90)
+        .unwrap_or_default();
 
     FrostmodStatus {
         installed,
@@ -250,6 +315,7 @@ pub async fn status(app: &AppHandle) -> FrostmodStatus {
         running: crate::frostmod::is_running(),
         supported_for_game,
         missing_runtimes: crate::vcruntime::missing(game_dir.as_deref()),
+        stray_msvcr90,
     }
 }
 
@@ -451,7 +517,16 @@ pub async fn install(app: &AppHandle) -> anyhow::Result<InstallReport> {
 
     let applied = apply_staged(&dir, &staging);
     let _ = std::fs::remove_dir_all(&staging);
-    let needs_game_restart = applied?;
+    let mut needs_game_restart = applied?;
+
+    // The output-plugin copy is what supplies the session identity used by precise paint
+    // sync. Failure does not undo a working FrostMod install: injection still reloads mods,
+    // and the app falls back to its broader roster sync until the folder is writable.
+    let cfg = crate::config::load(app).unwrap_or_default();
+    match ensure_output_plugin(app, &cfg, Some(&rel.tag_name)) {
+        Ok(restart) => needs_game_restart |= restart,
+        Err(e) => log::warn!("couldn't install FrostMod output plugin: {e:#}"),
+    }
 
     // Written last, and only once both binaries are actually in place, so the version
     // we report can never describe an install that didn't happen.
@@ -494,7 +569,8 @@ fn plan_start(app: &AppHandle) -> anyhow::Result<Option<StartPlan>> {
     let active_game = crate::config::load(app)
         .map(|c| c.active_game)
         .unwrap_or_default();
-    if !crate::frostmod::supported_for_game(active_game, installed_version(app).as_deref()) {
+    let installed = installed_version(app);
+    if !crate::frostmod::supported_for_game(active_game, installed.as_deref()) {
         anyhow::bail!(
             "This FrostMod build isn't safe on {} — update FrostMod to {} or newer.",
             active_game.profile().display,
@@ -518,6 +594,9 @@ fn plan_start(app: &AppHandle) -> anyhow::Result<Option<StartPlan>> {
     // real folder — the user may well have moved it — so send it rather than let FrostMod
     // guess. Harmless on every FrostMod that ever shipped: `--mods` predates `--game`.
     let cfg = crate::config::load(app).unwrap_or_default();
+    if let Err(e) = ensure_output_plugin(app, &cfg, installed.as_deref()) {
+        log::warn!("couldn't refresh FrostMod output plugin: {e:#}");
+    }
     // The *mods tree*, not the folder above it. FrostMod appends `\tracks` and `\bikes`
     // to whatever `--mods` gives it (its own default is `…\MX Bikes\mods`), so sending
     // `cfg.mods_path` pointed its track manager and model swap at folders that don't
@@ -539,13 +618,44 @@ pub fn start(app: &AppHandle, state: &FrostmodProcess) -> anyhow::Result<bool> {
     if let Some(mods) = &plan.mods_root {
         args.extend(["--mods".into(), mods.to_string_lossy().into_owned()]);
     }
+    // Logged on both sides, as Linux and macOS already are. FrostMod not working is the
+    // single most reported thing about this app, and until now the Windows path — the one
+    // nearly every report comes from — said nothing at all in the log, whether it worked
+    // or not.
+    log::info!("starting FrostMod: {} {:?}", plan.exe.display(), args);
     let child = std::process::Command::new(&plan.exe)
         .current_dir(frostmod_dir(app))
         .args(&args)
         .creation_flags(CREATE_NO_WINDOW)
-        .spawn()?;
+        .spawn()
+        .map_err(|e| anyhow::anyhow!("Couldn't start {}: {e}", plan.exe.display()))?;
+    log::info!("FrostMod started (pid {})", child.id());
     *state.0.lock().unwrap() = Some(child);
     Ok(true)
+}
+
+/// Re-arm FrostMod for a game session that has just begun.
+///
+/// FrostMod injects into one game process. When that process goes, so does the injection —
+/// and nothing used to bring it back, because the only automatic start was at app launch.
+/// So the second race of a session ran without it: no live reloads, no model swaps, and no
+/// indication that anything was different from the first.
+///
+/// Called from [`crate::sessionwatch`], which already polls for the game starting, and so
+/// covers a launch from Steam or the desktop exactly as well as one from the Play button.
+pub fn on_game_started(app: &AppHandle, cfg: &crate::config::AppConfig) {
+    if !cfg.auto_run_frostmod || !is_installed(app) {
+        return;
+    }
+    let state = app.state::<FrostmodProcess>();
+    match start(app, &state) {
+        Ok(true) => log::info!("FrostMod re-armed for the new game session"),
+        // Already up and holding its reload event, which is the ordinary case when the
+        // launcher outlives a game. Whether it got *into* this game is a separate
+        // question, and `frostmod::attachment` is what answers it.
+        Ok(false) => log::debug!("FrostMod was already running when the game started"),
+        Err(e) => log::warn!("couldn't start FrostMod for the new game session: {e:#}"),
+    }
 }
 
 /// Where the wrapper's own output goes — Proton's on Linux, Wine's on macOS — appended to

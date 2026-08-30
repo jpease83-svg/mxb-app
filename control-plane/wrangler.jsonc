@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "mxb-control-plane",
+  "name": "amx-paint-sync",
   "main": "src/index.ts",
   "compatibility_date": "2026-08-08",
   "compatibility_flags": ["nodejs_compat"],
@@ -9,9 +9,16 @@
   // config means a change is a reviewable diff rather than an invisible dashboard edit.
   // The AWS key itself is a secret; see `src/env.d.ts`.
   "vars": {
+    // Open self-enrollment for the public paint-sync beta. The account ceiling below keeps
+    // an accidental or abusive signup burst from becoming an open-ended storage bill.
+    "MXB_PUBLIC_ENROLLMENT": "1",
+    "MXB_PUBLIC_ACCOUNT_LIMIT": "250",
+    // Solo viewers fetch recently published riders without requiring a live heartbeat from
+    // every paint owner. Keep that catalog bounded so a first sync stays predictable.
+    "MXB_CATALOG_MAX_RIDERS": "50",
     // The hard ceiling on concurrent servers. This, and the idle reaper below, are what
     // keep an hourly-billed resource from turning into an open-ended bill.
-    "MXB_MAX_INSTANCES": "2",
+    "MXB_MAX_INSTANCES": "0",
     // Minutes a server may sit with nobody on it before it is destroyed.
     "MXB_IDLE_MINUTES": "20",
     // The backstop. Nothing lives longer than this, whatever else has gone wrong — a hung
@@ -20,15 +27,15 @@
     "MXB_MAX_LIFETIME_MINUTES": "240",
     "MXB_INSTANCE_TYPE": "t3.small",
     // Opens the game's UDP port and the agent's TCP port. Empty disables launching.
-    "MXB_SECURITY_GROUP_ID": "sg-0d17867610872ce20",
+    "MXB_SECURITY_GROUP_ID": "",
     // Where a fresh instance fetches the agent and the dedicated server from. Both must be
     // reachable without credentials, because the instance has none.
-    "MXB_AGENT_DOWNLOAD_URL": "https://mxb-control-plane.aui-svi.workers.dev/v1/agent.exe",
+    "MXB_AGENT_DOWNLOAD_URL": "",
     // PiBoSo's own installer. There is no separate dedicated-server package — the server
     // is inside this, and the bootstrap runs it with `-extract` to unpack it. Pointing at
     // the official URL means nothing of theirs is rehosted, at the cost of a 2 GB download
     // on every launch. Baking an AMI is the obvious way to remove that later.
-    "MXB_GAME_DOWNLOAD_URL": "https://mx-bikes.com/downloads/mxbikes-beta21e.exe"
+    "MXB_GAME_DOWNLOAD_URL": ""
   },
 
   // The idle reaper. Every five minutes it asks each running server who is connected and
@@ -47,17 +54,26 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "mxb-control-plane",
-      "database_id": "c993c497-28b4-480b-8e6e-fb61a0b18c2b"
+      "database_name": "amx-paint-sync",
+      "database_id": "648a5e83-d3f1-4988-958f-9c2bf791ad36"
     }
   ],
+
+  // One voice room per game server, addressed by the same server key paint sync already
+  // computes. Naming the object creates it, and it goes away when the last rider leaves —
+  // which is the entire lifecycle. It stores nothing: peers live on their own hibernating
+  // sockets, so an idle room costs nothing and there is no state to reconcile.
+  "durable_objects": {
+    "bindings": [{ "name": "VOICE_ROOMS", "class_name": "VoiceRoom" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["VoiceRoom"] }],
 
   // Paints are content-addressed by SHA-256, so an upload of a paint someone else already
   // shared is a no-op and every rider on a server pulls the same object.
   "r2_buckets": [
     {
       "binding": "PAINTS",
-      "bucket_name": "mxb-paints"
+      "bucket_name": "amx-paints"
     }
   ]
 }

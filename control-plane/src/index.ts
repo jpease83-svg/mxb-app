@@ -44,14 +44,22 @@ import {
   type Verdict,
   MAX_BOOTSTRAP_LOG,
   MAX_PAINT_BYTES,
+  PRESENCE_TTL_MS,
 } from "./validate";
+import { claimDeviceAccount, iceServers, voiceRoom } from "./voice";
+import { VoiceRoom } from "./voiceroom";
 
 interface Account {
   id: string;
   rider_name: string;
   steam_id: string | null;
   guid: string | null;
+  /** `invited` (an invite code was claimed) or `device` (self-serve, voice only). */
+  kind: string;
 }
+
+// The runtime finds a Durable Object class by its export from the entry module.
+export { VoiceRoom };
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -77,7 +85,9 @@ export default {
    */
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(
-      Promise.all([reapIdleServers(env), advanceImageBuild(env)]).then(() => undefined),
+      Promise.all([reapIdleServers(env), advanceImageBuild(env), pruneDeviceClaims(env)]).then(
+        () => undefined,
+      ),
     );
   },
 } satisfies ExportedHandler<Env>;
@@ -110,9 +120,15 @@ async function route(request: Request, env: Env): Promise<Response> {
     return artifact(env, `content/bikes/${name}`);
   }
 
-  // Enrollment is the one unauthenticated write: it trades an invite code for a token.
-  // Steam sign-in will replace the invite code without changing anything downstream.
+  // Enrollment is the one unauthenticated write. Public beta deployments let a rider
+  // create their own account; private deployments can still require a one-use invite.
+  // Steam sign-in can replace either gate without changing anything downstream.
   if (method === "POST" && path === "/v1/enroll") return enroll(request, env);
+
+  // Self-serve signup, no invite. Voice is the reason this exists: a rider on a community
+  // server has nobody to talk to unless the people beside them can sign up too. The account
+  // it mints can report presence and join a voice room and nothing else — see `invitedOnly`.
+  if (method === "POST" && path === "/v1/account") return claimDeviceAccount(request, env);
 
   // The server list is public, and has to be: it is what the app's join picker offers, and
   // requiring a token meant a player who hadn't enrolled was shown an empty box asking for
@@ -137,10 +153,23 @@ async function route(request: Request, env: Env): Promise<Response> {
   const account = await authenticate(request, env);
   if (!account) return json(401, { error: "unauthorized" });
 
+  // Open to every account, self-serve ones included: who you are, where you are, and the
+  // voice room for the server you said you are on.
   if (method === "GET" && path === "/v1/me") return me(account, env);
   if (method === "PUT" && path === "/v1/me/guid") return putGuid(request, account, env);
+  if (method === "PUT" && path === "/v1/presence") return putPresence(request, account, env);
+  if (method === "GET" && path === "/v1/voice/ice") return iceServers();
+  if (method === "GET" && path === "/v1/voice/room") return voiceRoom(request, url, account, env);
+
+  // Everything past here needs an invite. The gate is the *position* rather than a check
+  // repeated on each route, so a route added below inherits it and one added above is a
+  // deliberate decision to open it up.
+  const gate = invitedOnly(account);
+  if (gate) return gate;
+
   if (method === "PUT" && path === "/v1/loadout") return putLoadout(request, account, env);
   if (method === "PUT" && path === "/v1/loadouts") return putLoadouts(request, account, env);
+  if (method === "GET" && path === "/v1/catalog") return catalog(env);
   if (method === "GET" && path === "/v1/roster") return roster(url, env);
   if (method === "PUT" && path === "/v1/presence") return putPresence(request, account, env);
   if (method === "PUT" && path === "/v1/integrity") return putIntegrity(request, account, env);
@@ -164,6 +193,22 @@ async function route(request: Request, env: Env): Promise<Response> {
   return json(404, { error: "no such endpoint" });
 }
 
+/**
+ * Forget yesterday's signup counters.
+ *
+ * The counter only ever answers "how many today", so a row from last week is a record of an
+ * address we said we had no use for. Swept on the same cron as the idle servers.
+ */
+async function pruneDeviceClaims(env: Env): Promise<void> {
+  const cutoff = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  try {
+    await env.DB.prepare("DELETE FROM device_claims WHERE day < ?").bind(cutoff).run();
+  } catch (err) {
+    // A sweep that fails is tomorrow's sweep's problem, not this invocation's.
+    console.error(JSON.stringify({ msg: "device claim sweep failed", error: String(err) }));
+  }
+}
+
 async function authenticate(request: Request, env: Env): Promise<Account | null> {
   const token = bearer(request.headers.get("Authorization"));
   if (!token) return null;
@@ -171,7 +216,7 @@ async function authenticate(request: Request, env: Env): Promise<Account | null>
   // of a secret in our code to leak timing.
   const hash = await hashToken(token);
   return await env.DB.prepare(
-    "SELECT id, rider_name, steam_id, guid FROM accounts WHERE token_hash = ?",
+    "SELECT id, rider_name, steam_id, guid, kind FROM accounts WHERE token_hash = ?",
   )
     .bind(hash)
     .first<Account>();
@@ -182,19 +227,36 @@ async function enroll(request: Request, env: Env): Promise<Response> {
   if (!body) return json(400, { error: "expected a JSON body" });
 
   const { code, riderName } = body as { code?: unknown; riderName?: unknown };
-  if (typeof code !== "string" || code.trim().length === 0) {
+  const publicEnrollment = env.MXB_PUBLIC_ENROLLMENT === "1";
+  const inviteCode = typeof code === "string" ? code.trim() : "";
+  if (!publicEnrollment && inviteCode.length === 0) {
     return json(400, { error: "an invite code is required" });
   }
   if (!isRiderName(riderName)) {
     return json(400, { error: "riderName must match your in-game rider name" });
   }
 
-  const invite = await env.DB.prepare("SELECT code, claimed_by FROM invites WHERE code = ?")
-    .bind(code.trim())
-    .first<{ code: string; claimed_by: string | null }>();
+  const invite = publicEnrollment
+    ? null
+    : await env.DB.prepare("SELECT code, claimed_by FROM invites WHERE code = ?")
+        .bind(inviteCode)
+        .first<{ code: string; claimed_by: string | null }>();
   // One message for both cases: telling an unknown code apart from a used one turns this
   // into an oracle for enumerating valid codes.
-  if (!invite || invite.claimed_by) return json(403, { error: "that invite code isn't usable" });
+  if (!publicEnrollment && (!invite || invite.claimed_by)) {
+    return json(403, { error: "that invite code isn't usable" });
+  }
+
+  // A public beta needs a cost backstop. This is deliberately a deployment variable so an
+  // operator can raise the ceiling without shipping another client. It is not an identity
+  // system or an anti-abuse substitute; Steam sign-in is still the production destination.
+  if (publicEnrollment) {
+    const limit = Number(env.MXB_PUBLIC_ACCOUNT_LIMIT ?? "250");
+    const count = await env.DB.prepare("SELECT COUNT(*) AS n FROM accounts").first<{ n: number }>();
+    if (!Number.isFinite(limit) || limit < 1 || (count?.n ?? 0) >= limit) {
+      return json(503, { error: "the public beta is currently full" });
+    }
+  }
 
   const id = crypto.randomUUID();
   const token = newToken();
@@ -202,15 +264,20 @@ async function enroll(request: Request, env: Env): Promise<Response> {
   const now = Date.now();
 
   try {
-    // Batched so a claimed invite can never exist without the account it created.
-    await env.DB.batch([
-      env.DB.prepare(
-        "INSERT INTO accounts (id, rider_name, token_hash, created_at) VALUES (?, ?, ?, ?)",
-      ).bind(id, (riderName as string).trim(), hash, now),
-      env.DB.prepare(
-        "UPDATE invites SET claimed_by = ?, claimed_at = ? WHERE code = ? AND claimed_by IS NULL",
-      ).bind(id, now, invite.code),
-    ]);
+    const insert = env.DB.prepare(
+      "INSERT INTO accounts (id, rider_name, token_hash, created_at) VALUES (?, ?, ?, ?)",
+    ).bind(id, (riderName as string).trim(), hash, now);
+    if (publicEnrollment) {
+      await insert.run();
+    } else {
+      // Batched so a claimed invite can never exist without the account it created.
+      await env.DB.batch([
+        insert,
+        env.DB.prepare(
+          "UPDATE invites SET claimed_by = ?, claimed_at = ? WHERE code = ? AND claimed_by IS NULL",
+        ).bind(id, now, invite!.code),
+      ]);
+    }
   } catch (err) {
     // The unique index on lower(rider_name) is what rejects a duplicate, so this is the
     // expected path for a name someone already has — not an internal error.
@@ -223,6 +290,18 @@ async function enroll(request: Request, env: Env): Promise<Response> {
   // The only time the token is ever visible. It is stored as a digest, so it cannot be
   // shown again and a database leak yields nothing presentable.
   return json(201, { accountId: id, token, riderName: (riderName as string).trim() });
+}
+
+/**
+ * Refuse anything a self-serve account has no business doing.
+ *
+ * Voice is open to everyone with the app; publishing paints, registering a server and
+ * provisioning one are not, and none of them was ever written with an anonymous caller in
+ * mind. Called once, at the point in the route table where the open endpoints end.
+ */
+function invitedOnly(account: Account): Response | null {
+  if (account.kind === "invited") return null;
+  return json(403, { error: "that needs an invite" });
 }
 
 /**
@@ -1296,8 +1375,40 @@ async function connectedCount(
   }
 }
 
-/** How long a presence heartbeat counts for before the rider is treated as gone. */
-const PRESENCE_TTL_MS = 10 * 60 * 1000;
+
+interface PaintRow {
+  rider_name: string;
+  guid: string | null;
+  slot: string;
+  file_name: string;
+  sha256: string;
+  size: number;
+  rel_dest: string;
+}
+
+function paintRoster(scope: string, rows: PaintRow[]): Response {
+  const riders = new Map<string, { riderName: string; guid: string | null; paints: unknown[] }>();
+  for (const r of rows) {
+    // Re-checked on the way out as well as in. A row predating the validation, or one written
+    // by some future path that forgot it, must not reach a client that is about to turn it
+    // into a filesystem path.
+    if (!isRelDest(r.rel_dest)) continue;
+    const key = r.guid ?? `name:${r.rider_name.toLowerCase()}`;
+    let rider = riders.get(key);
+    if (!rider) {
+      rider = { riderName: r.rider_name, guid: r.guid, paints: [] };
+      riders.set(key, rider);
+    }
+    rider.paints.push({
+      slot: r.slot,
+      fileName: r.file_name,
+      sha256: r.sha256,
+      size: r.size,
+      relDest: r.rel_dest,
+    });
+  }
+  return json(200, { server: scope, riders: [...riders.values()] });
+}
 
 /**
  * "I am on this server."
@@ -1354,37 +1465,38 @@ async function roster(url: URL, env: Env): Promise<Response> {
       " GROUP BY a.id, p.rel_dest, p.sha256",
   )
     .bind(serverId, Date.now() - PRESENCE_TTL_MS)
-    .all<{
-      rider_name: string;
-      guid: string | null;
-      slot: string;
-      file_name: string;
-      sha256: string;
-      size: number;
-      rel_dest: string;
-    }>();
+    .all<PaintRow>();
 
-  const riders = new Map<string, { riderName: string; guid: string | null; paints: unknown[] }>();
-  for (const r of rows.results) {
-    // Re-checked on the way out as well as in. A row predating the validation, or one written
-    // by some future path that forgot it, must not reach a client that is about to turn it
-    // into a filesystem path.
-    if (!isRelDest(r.rel_dest)) continue;
-    const key = r.guid ?? `name:${r.rider_name.toLowerCase()}`;
-    let rider = riders.get(key);
-    if (!rider) {
-      rider = { riderName: r.rider_name, guid: r.guid, paints: [] };
-      riders.set(key, rider);
-    }
-    rider.paints.push({
-      slot: r.slot,
-      fileName: r.file_name,
-      sha256: r.sha256,
-      size: r.size,
-      relDest: r.rel_dest,
-    });
-  }
-  return json(200, { server: serverId, riders: [...riders.values()] });
+  return paintRoster(serverId, rows.results);
+}
+
+/**
+ * Recently published riders, independent of live presence.
+ *
+ * This is the solo-viewer path: one running client can install looks their owners published
+ * earlier, even when those owners do not have MXB App open for this race. It is capped to the
+ * most recently updated accounts because a global archive that grows forever would turn one
+ * click into an unbounded download.
+ */
+async function catalog(env: Env): Promise<Response> {
+  const configured = Number(env.MXB_CATALOG_MAX_RIDERS ?? "50");
+  const limit = Number.isFinite(configured) ? Math.min(250, Math.max(1, Math.floor(configured))) : 50;
+  const rows = await env.DB.prepare(
+    "WITH recent AS (" +
+      " SELECT account_id, MAX(updated_at) AS last_update FROM loadouts" +
+      " GROUP BY account_id ORDER BY last_update DESC LIMIT ?" +
+      ")" +
+      " SELECT a.rider_name, a.guid, MIN(p.slot) AS slot, p.file_name, p.sha256, p.size, p.rel_dest" +
+      " FROM recent r" +
+      " JOIN accounts a ON a.id = r.account_id" +
+      " JOIN loadout_paints p ON p.account_id = a.id" +
+      " GROUP BY a.id, p.rel_dest, p.sha256" +
+      " ORDER BY r.last_update DESC",
+  )
+    .bind(limit)
+    .all<PaintRow>();
+
+  return paintRoster("catalog", rows.results);
 }
 
 /**

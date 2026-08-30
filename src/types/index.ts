@@ -109,6 +109,10 @@ export interface Config {
   overlayEnabled?: boolean;
   /** Overlay toggle combo in Tauri accelerator syntax, e.g. `"CommandOrControl+Shift+X"`. */
   overlayHotkey?: string;
+  /** Which tyre pack the 3D previews fit a bike with. **Blank means the pack the bike's own
+   *  `gfx.cfg` names**, which is what the game would fit. Substituting the name is all it
+   *  takes to see a bike on another pack — nothing on disk is touched. */
+  previewTyres?: string;
   /** Voice chat is off until turned on — a feature that opens a microphone shouldn't be
    *  something anyone discovers by accident. */
   voiceEnabled?: boolean;
@@ -256,6 +260,11 @@ export interface ModDetail {
   images: string[];
   /** e.g. "Beta 19", when the page states it. */
   version: string | null;
+  /** Who the catalog credits the mod to, from the byline on its page. `null` when the
+   *  page carries none — same meaning as `ModSummary.author`. */
+  author: string | null;
+  /** The author's profile page on the catalog, for the byline link. */
+  authorUrl: string | null;
   downloads: DownloadOption[];
   /**
    * The post's category names ("2023 KTM 450 SX-F OEM", "Liveries", "KTM"). A livery is
@@ -325,6 +334,11 @@ export interface ModelVariant {
   empty: boolean;
   /** Number of top-level files in the set. */
   fileCount: number;
+  /**
+   * Liveries assigned to this model, by base name (no `.pnt`). Empty means the model has
+   * no opinion; a livery no model claims stays on offer under every model.
+   */
+  paints: string[];
 }
 
 /** A bike and every model it can be swapped between (active first). */
@@ -420,13 +434,13 @@ export interface Submesh {
 export interface EdfNode {
   name: string;
   /** `3 * vertexCount` — positions (local space). */
-  positions: number[];
+  positions: Float32Array;
   /** `2 * vertexCount` — uv0 per vertex (empty if none). */
-  uvs: number[];
+  uvs: Float32Array;
   /** `3 * vertexCount` — normals per vertex (empty if none). */
-  normals: number[];
+  normals: Float32Array;
   /** `3 * triangleCount` — u32 indices, a plain triangle list. */
-  indices: number[];
+  indices: Uint32Array;
   /** Material groups over the kept triangle list (empty if not resolved). */
   submeshes: Submesh[];
   texture: string | null;
@@ -459,6 +473,37 @@ export interface BikePaint {
   changesPreview: boolean;
 }
 
+/** A point in the bike's frame — the same one `EdfNode.positions` are in. */
+export type Vec3 = [number, number, number];
+
+/**
+ * The joints an assembled bike can be posed about.
+ *
+ * A bike's `.geom` places its parts in the frame it was *authored* in and says nothing about
+ * where the suspension rides at rest — there is no travel in the file, and ride height falls
+ * out of physics the viewer doesn't run. So the viewer poses instead: the swingarm turns about
+ * `pivot`, the fork slides along the axis `rake` tilts through `steerHead`, and the axles say
+ * where the wheels ride so a stance can be solved for level.
+ */
+export interface BikeRig {
+  /** Swingarm pivot. */
+  pivot: Vec3;
+  /** A point on the steering axis (the head itself). */
+  steerHead: Vec3;
+  /** Rake in degrees, tilting the steering axis back from vertical. */
+  rake: number;
+  /** Where the wheels ride. Null when the `.geom` names no axles. */
+  frontAxle: Vec3 | null;
+  rearAxle: Vec3 | null;
+  /**
+   * Where a rider sits, from the `.geom`'s `seat_height_ref`. Null when it names none.
+   *
+   * The bike's own statement of where its seat is — nothing in the mesh marks one — in the
+   * same frame as the axles above, which is what lets the viewer stand a rider on it.
+   */
+  seat: Vec3 | null;
+}
+
 export interface BikeModel {
   nodes: EdfNode[];
   paints: BikePaint[];
@@ -472,6 +517,13 @@ export interface BikeModel {
    */
   base: PaintTexture[];
   /**
+   * The tyres mod the wheels were drawn from, or `null` when the bike drew none.
+   *
+   * What was actually fitted, not what was asked for: a pick naming a pack that isn't
+   * installed falls back to the bike's own, and the picker shows what's on screen.
+   */
+  tyres: string | null;
+  /**
    * Whether the bike's `.geom` placed the parts into one frame.
    *
    * False means each node is still in its own local frame, so a vertex's position and normal
@@ -479,12 +531,41 @@ export interface BikeModel {
    * facing from exactly those, and stays quiet rather than guessing when this is false.
    */
   assembled: boolean;
+  /** The joints to pose about. Null for a bike that wasn't assembled. */
+  rig: BikeRig | null;
+}
+
+/**
+ * One bone of a rider's rig, as `rider.edf` stores it, already turned into the frame the
+ * viewer draws the body in.
+ */
+export interface Bone {
+  /** The rig's own name, e.g. `riderRIG_LeftElbow`. The game references these in `gfx.cfg`. */
+  name: string;
+  /** Index into the same array. Null for the root, and only for the root. */
+  parent: number | null;
+  /** Bone space → model space at rest. Row-major, translation in the fourth column. */
+  bind: number[];
+  /** Model space → bone space at rest. */
+  invBind: number[];
+  /** The slice of the mesh this bone covers, in bone space. */
+  aabbLo: Vec3;
+  aabbHi: Vec3;
+}
+
+/** Which bones move which vertices: four of each per vertex, in `nodes` order. */
+export interface Skin {
+  indices: number[];
+  weights: number[];
 }
 
 export interface RiderPart {
   part: "body" | "helmet" | "boots" | "protection" | "suit" | "gloves";
   nodes: EdfNode[];
   textures: PaintTexture[];
+  /** Only the body carries a rig; gear is rigid and hangs off a bone. */
+  skeleton?: Bone[];
+  skin?: Skin | null;
 }
 
 /** The rider's real 3D preview, assembled from a loadout's installed gear + paints. */
@@ -634,6 +715,106 @@ export interface TrackTerrain {
   heights: Float32Array;
 }
 
+/**
+ * A track's scenery — what stands on the ground the terrain grid describes.
+ *
+ * Positions are world metres in the game's own left-handed frame, the same one the terrain
+ * grid is placed in, so the viewer mirrors X over both at once.
+ */
+export interface TrackScenery {
+  /** `3 * vertexCount`, world metres. */
+  positions: Float32Array;
+  /** `3 * vertexCount`, unit length. */
+  normals: Float32Array;
+  /** `2 * vertexCount`. Tiling, so these run well outside 0–1. */
+  uvs: Float32Array;
+  /** `3 * triangleCount`. Sorted so each material's triangles sit together. */
+  indices: Uint32Array;
+  /** One run of triangles per material. */
+  groups: TrackSceneryGroup[];
+  /** The surfaces the map paints those runs with. */
+  textures: TrackSceneryTexture[];
+  /**
+   * How many connected pieces the scenery comes apart into — one per tent, trailer or
+   * foliage card. The unit a designer picks, hides or moves.
+   */
+  pieceCount: number;
+  /** Which piece each triangle belongs to — turns a ray hit into a thing you can point at. */
+  pieceOfTriangle: Uint32Array;
+  /** World bounds, metres: `[minX, minY, minZ, maxX, maxY, maxZ]`. */
+  bounds: [number, number, number, number, number, number];
+}
+
+export interface TrackSceneryGroup {
+  material: number;
+  triStart: number;
+  triCount: number;
+}
+
+export interface TrackSceneryTexture {
+  /** Which material this paints. */
+  material: number;
+  width: number;
+  height: number;
+  /**
+   * An alpha cut-out — foliage, crowd, fencing. It has to be drawn with an alpha test:
+   * without one every leaf card is an opaque rectangle, and a treeline becomes a wall.
+   */
+  alpha: boolean;
+  /** `width * height * 4`, RGBA, first row first. */
+  pixels: Uint8Array<ArrayBuffer>;
+}
+
+/** A track's sky, its backdrop, and the light it sits under. */
+export interface TrackBackdrop {
+  /** Direction the sun comes from, as the track states it. */
+  sun: [number, number, number] | null;
+  skyColour: [number, number, number] | null;
+  sunColour: [number, number, number] | null;
+  ambientColour: [number, number, number] | null;
+  fogColour: [number, number, number] | null;
+  fogDensity: number | null;
+  /** The dome overhead, and the ring of land beyond the track. Either may be empty. */
+  sky: TrackMeshArrays;
+  backdrop: TrackMeshArrays;
+}
+
+/** Bare mesh arrays, in world metres. */
+export interface TrackMeshArrays {
+  positions: Float32Array;
+  normals: Float32Array;
+  uvs: Float32Array;
+  indices: Uint32Array;
+  /** The picture it carries. A sky dome is a few hundred triangles and one large image. */
+  picture: { width: number; height: number; pixels: Uint8Array<ArrayBuffer> } | null;
+}
+
+/**
+ * A tiling sheet of the track's own ground, and its relief.
+ *
+ * What the ground is made of, not what is where — tiled far finer than the third of a metre
+ * a track states its surface at.
+ */
+export interface TrackGround {
+  colour: TrackSceneryTexture;
+  /** Its normal map, where the track ships one under a ground name. */
+  normal: TrackSceneryTexture | null;
+}
+
+/** What a track pins to a point but ships no mesh for. Mirrors `scenery::Placement`. */
+export interface TrackPlacement {
+  /** A key, not prose — the UI translates it. */
+  kind: "prop" | "marshal" | "camera" | "sound";
+  /** The `.edf` for a prop, the `.wav` for a sound, otherwise the track's own name for it. */
+  name: string;
+  /** World metres, game frame. */
+  pos: [number, number, number];
+  /** Degrees, where the track states one. */
+  heading: number | null;
+  /** Full rotation in degrees, for props that carry one — what a `.scr` writes back. */
+  rot?: [number, number, number] | null;
+}
+
 /** What the dropzone decided a dropped item is. Mirrors `dropzone::ContentKind`. */
 export type DropKind =
   | "modsTree"
@@ -642,6 +823,9 @@ export type DropKind =
   | "bikePaint"
   | "soundSet"
   | "riderGear"
+  /** A tyre set (`mods/tyres`). Only ever comes out of a split pack — on its own a tyre
+   *  package says too little to be recognised. */
+  | "tyres"
   | "reshadePreset"
   | "unknown";
 
@@ -659,6 +843,8 @@ export type DropReason =
   | "riderTexture"
   | "gearTexture"
   | "reshadePreset"
+  /** The pack it arrived in filed it here. */
+  | "packLayout"
   | "unrecognised";
 
 export interface DropChoice {
@@ -736,7 +922,7 @@ export interface DropOutcome {
 
 /** Where a download's bytes came from: the mod site, a shop purchase, or a local file the
  *  user imported or dragged in. */
-export type DownloadSource = "site" | "shop" | "file";
+export type DownloadSource = "site" | "shop" | "hub" | "file";
 
 export type DownloadStatus = "installed" | "failed";
 
@@ -764,11 +950,59 @@ export interface DownloadRecord {
 /** What a caller supplies; `id` and `at` are the backend's to assign. */
 export type NewDownload = Omit<DownloadRecord, "id" | "at">;
 
+/** Whether the mods tree still holds a mod the ledger knows about.
+ *  `parked` is Manage having moved it aside — recoverable, and not a deletion. */
+export type LedgerState = "present" | "parked" | "gone";
+
+/** One mod the library has held, from the first time it was seen. Outlives the files:
+ *  the snapshot fields are captured while the mod is installed and are all that remains
+ *  once it is deleted. See `src-tauri/src/ledger.rs`. */
+export interface LedgerEntry {
+  /** Lowercased path relative to the MX Bikes root — the row's stable identity. */
+  key: string;
+  /** Last known path relative to that root, e.g. `mods/tracks/EU/RedBud.pkz`. */
+  rel: string;
+  name: string;
+  category: LibraryCategory;
+  folder: string;
+  size: number;
+  isDir: boolean;
+  /** Unix milliseconds. */
+  firstSeen: number;
+  lastSeen: number;
+  state: LedgerState;
+  /** When it went, stamped once — null while it is still installed or parked. */
+  goneAt: number | null;
+  /** The mod's own declared name, often nothing like its filename. */
+  title: string | null;
+  author: string | null;
+  location: string | null;
+  /** Track length in metres. */
+  length: number | null;
+  /** Thumbnail filename on disk; use `thumbData` to render. */
+  thumb: string | null;
+  /** When the snapshot was taken, whether or not it found anything — plenty of archives
+   *  carry no metadata, and those must not be re-read on every pass. */
+  snapshotAt: number | null;
+  /** Where the Trash put the files, when the app deleted them and could tell. Non-null is
+   *  what makes Restore offerable; null means it went some other way. */
+  trashedAt: string | null;
+}
+
+/** A ledger row on its way to the UI, with its thumbnail inflated for rendering. */
+export interface LedgerRow extends LedgerEntry {
+  /** `data:image/jpeg;base64,…`, or null when no snapshot was ever taken. */
+  thumbData: string | null;
+}
+
 export type InstallStage =
   | "resolving"
   | "downloading"
   | "extracting"
   | "placing"
+  /** The download held several mods and the user is picking which of them to install.
+   *  Nothing is written yet, and the queue lane has already moved on. */
+  | "review"
   | "done"
   | "error";
 
@@ -793,6 +1027,33 @@ export interface FrostmodReload {
    *  this — an in-app install already knows what it placed. */
   mods?: string[];
 }
+
+/** Whether FrostMod's DLL is actually inside the running game. Mirrors
+ *  `frostmod::AttachState`.
+ *
+ *  `running` (the pill's usual source) only says the launcher process is up. These two
+ *  answers come apart when the game runs at a higher integrity level than the app: the
+ *  injector can't open a process above it, so FrostMod is running and simply never gets
+ *  in — which used to look like the app lying about it. */
+export type AttachState =
+  | "game_not_running"
+  | "attached"
+  /** Up, not in yet, and still inside the grace period. Not a problem. */
+  | "attaching"
+  | "not_attached"
+  /** Windows won't let us look inside the game — and won't let FrostMod in either. */
+  | "blocked"
+  | "unknown";
+
+/** Mirrors `frostmod::Attachment`. */
+export interface Attachment {
+  state: AttachState;
+  /** What is wrong and how to fix it. Empty unless the state calls for it. */
+  reason: string;
+}
+
+/** The attach states worth putting in front of the user. */
+export const ATTACH_PROBLEM: readonly AttachState[] = ["blocked", "not_attached"];
 
 /** Result of pressing Play. `already_running` means we deliberately did nothing. */
 export type LaunchOutcome = "launched" | "already_running";
@@ -870,6 +1131,12 @@ export interface SwapApplyOutcome {
    * it still no-ops unless the swapped bike is the one currently selected in-game.
    */
   model_refresh: CommandOutcome | null;
+  /**
+   * Liveries that couldn't be moved into or out of `paints/`. MX Bikes holds bike files
+   * open while it runs, so a swap or an assignment made mid-session can leave some
+   * liveries where they were — and the filter is only as good as the move.
+   */
+  paints_stuck: number;
 }
 
 /** Install/version/running snapshot for the FrostMod settings panel. */
@@ -904,6 +1171,13 @@ export interface FrostmodStatus {
    * FrostMod starting — it's a warning with a one-click fix attached.
    */
   missingRuntimes: VcRuntime[];
+  /**
+   * A loose `msvcr90.dll` beside the game exe that the app didn't remove on its own.
+   *
+   * `clear`/`removed` mean there's nothing to say. `foreign` and `locked` mean a file that
+   * aborts MX Bikes with R6034 is still sitting there — see {@link StrayMsvcr90}.
+   */
+  strayMsvcr90: StrayMsvcr90;
 }
 
 /**
@@ -915,6 +1189,22 @@ export interface FrostmodStatus {
  * out, and for the manual download links.
  */
 export type VcRuntime = "vc90" | "vc140" | "vc140_x86";
+
+/**
+ * What's left of a loose `msvcr90.dll` beside the game exe. Mirrors `vcruntime::Stray`.
+ *
+ * A loose VC9 CRT there kills the game with *"R6034 — An application has made an attempt to
+ * load the C runtime library incorrectly"*, because the CRT refuses to initialise outside a
+ * `Microsoft.VC90.CRT` activation context and a loose copy is never in one.
+ *
+ * - `clear` — nothing there. The normal case, and always the case off Windows.
+ * - `removed` — there was one, it was this app's (0.9.2–0.10.0 planted them), it's gone.
+ * - `foreign` — one matching no VC90 assembly on this PC. Someone else put it there, so the
+ *   app won't delete it unasked; the player is shown it and offered the move.
+ * - `locked` — ours, but something holds it open. That something is the game: closing it
+ *   and pressing again is the fix.
+ */
+export type StrayMsvcr90 = "clear" | "removed" | "foreign" | "locked";
 
 /** What a runtime install did. `cancelled` is the user dismissing the UAC prompt. */
 export type RuntimeInstallOutcome = "installed" | "cancelled";
@@ -932,9 +1222,11 @@ export interface RuntimeRepairReport {
   alreadyPresent: VcRuntime[];
   /** Still absent afterwards: a declined UAC prompt, a failed download, a pending reboot. */
   stillMissing: VcRuntime[];
-  /** Whether `msvcr90.dll` now sits beside the game executable. */
-  msvcr90Placed: boolean;
-  /** False when no game folder is configured, so there was nowhere to place it. */
+  /** What the sweep of the game folder found. `removed` is a repair that did something;
+   *  `foreign`/`locked` is one that found the likeliest reason the game won't start and
+   *  needs the player to say the word. */
+  strayMsvcr90: StrayMsvcr90;
+  /** False when no game folder is configured, so there was nowhere to look. */
   gameDirKnown: boolean;
 }
 
@@ -1214,6 +1506,43 @@ export interface ShopStatus {
   error: string | null;
 }
 
+/**
+ * MXB Hub — `shop.mxb-hub.com`, the marketplace `mxbhub.com` redirects to.
+ *
+ * Deliberately expressed as extensions of the shop's types rather than as a parallel set. The
+ * two stores sell the same kinds of thing to the same person, and the grid, the price tag, the
+ * purchase card and the detail page are shared between them — types that merely resembled each
+ * other would make every one of those a translation layer. What the Hub adds is a `slug` (its
+ * API is addressable by one, where the shop's dump is not) and a creator link.
+ */
+export interface HubMod extends ShopMod {
+  slug: string;
+}
+
+export interface HubModDetail extends ShopModDetail {
+  slug: string;
+  /** The store's own one-line summary — where a Hub listing says "in-game ready PKZ". */
+  summary: string | null;
+}
+
+export interface HubCategory extends ShopCategory {
+  /** The category's page on the store; also the creator's page, under `creators`. */
+  link: string | null;
+}
+
+export interface HubPage {
+  items: HubMod[];
+  total: number;
+  hasMore: boolean;
+  currency: string;
+}
+
+/**
+ * `relevance` is absent because the store rejects it — measured, not assumed. `onSale` is a
+ * filter here rather than an order, which is what the Store API actually offers.
+ */
+export type HubSort = "newest" | "popular" | "priceAsc" | "priceDesc" | "nameAsc";
+
 export type ShopSort =
   | "newest"
   | "recentlyUpdated"
@@ -1221,3 +1550,34 @@ export type ShopSort =
   | "priceDesc"
   | "onSale"
   | "nameAsc";
+
+/* ── Content lock ──────────────────────────────────────────────────────────────────── */
+
+/** One file a locking run would produce, or the reason it will be left alone. */
+export interface LockItem {
+  /** Where the file lands under each GUID folder — relative to the parent of the
+   *  selection it came from, so picking a folder keeps the folder. */
+  rel: string;
+  abs: string;
+  bytes: number;
+  /** A `.pkz` is locked as an archive; everything else as a single file. */
+  kind: "archive" | "file";
+  /** `null` when the file will be locked. */
+  skip: "junk" | "empty" | "protected" | null;
+}
+
+export interface LockOutcome {
+  guids: number;
+  files: number;
+  written: number;
+  skipped: number;
+  bytes: number;
+  outDir: string;
+}
+
+export interface LockProgress {
+  done: number;
+  total: number;
+  guid: string;
+  file: string;
+}

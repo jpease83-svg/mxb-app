@@ -44,11 +44,13 @@ export const en = {
   // ── Sidebar navigation ─────────────────────────────────────────────────────
   "nav.browse": "Browse",
   "nav.shop": "Shop",
+  "nav.hub": "MXB Hub",
   "nav.library": "Library",
   "nav.downloads": "Downloads",
   "nav.locker": "Locker",
   "nav.presets": "Presets",
   "nav.rider": "Rider",
+  "nav.pose": "Pose",
   "nav.designer": "Designer",
   "nav.paints": "Paints",
   "nav.studio": "Studio",
@@ -57,6 +59,7 @@ export const en = {
   "nav.settings": "Settings",
 
   "sidebar.installing": "Installing “{{name}}”",
+  "sidebar.installingCount": "Installing {{count}} mods",
   "sidebar.queued": "+{{count}} queued",
   "sidebar.expand": "Expand the sidebar",
   "sidebar.collapse": "Collapse the sidebar",
@@ -67,6 +70,7 @@ export const en = {
   "frostmod.checking": "Checking FrostMod…",
   "frostmod.running": "FrostMod running",
   "frostmod.notRunning": "FrostMod not running",
+  "frostmod.notInGame": "FrostMod not in game",
   "frostmod.reloadGame": "Reload game",
   "frostmod.start": "Start FrostMod",
   "frostmod.reloadedGame": "FrostMod reloaded the game.",
@@ -128,6 +132,13 @@ export const en = {
   "presets.help":
     "Save a full rider look and load it onto a bike on command.",
   "presets.profile": "Profile",
+  "presets.forgetBike": "Remove bike",
+  "presets.forgetBikeOne": "Remove {{name}} from this profile",
+  "presets.forgetBikeQ": "Remove this bike?",
+  "presets.forgetBikeBody":
+    "“{{name}}” leaves this profile’s bike list, along with the look saved for it. Nothing installed is deleted — if you ride that bike again the game adds it straight back.",
+  "presets.bikeForgotten": "Removed “{{name}}” from this profile.",
+  "presets.forgetFailed": "Couldn’t remove that bike",
   "presets.namePlaceholder": "Preset name…",
   "presets.savePreset": "Save preset",
   "presets.saveChanges": "Save changes",
@@ -206,6 +217,42 @@ export const en = {
   "slotGroup.rider": "Rider",
   "slotGroup.head": "Head",
   "slotGroup.body": "Body",
+
+
+  // ── Pose studio ────────────────────────────────────────────────────────────
+  "pose.help": "Stand the rider in a position — where the hands sit, how the legs are spread, one leg forward. The preview only; MX Bikes takes a rider's posture from its riding style.",
+  "pose.showing": "Showing",
+  "pose.none": "—",
+  "pose.bike": "Bike",
+  "pose.quick": "Quick moves",
+  "pose.quickHint": "Each one adds to the pose, so they stack. Fine-tune below.",
+  "pose.dragHint": "Drag the dots on the rider to move a limb — the joint above the one you grab does the turning. A limb moves at half the speed of the cursor; hold Shift for finer. The sliders are for twist and exact numbers.",
+  "pose.reset": "Reset",
+  "pose.group.torso": "Torso and head",
+  "pose.group.arms": "Arms",
+  "pose.group.hands": "Hands",
+  "pose.group.legs": "Legs",
+  "pose.move.legsWide": "Legs wider",
+  "pose.move.legsNarrow": "Legs closer",
+  "pose.move.leftLegForward": "Left leg forward",
+  "pose.move.elbowsUp": "Elbows up",
+  "pose.move.leanIn": "Lean in",
+  "pose.move.ride": "Riding position",
+  "pose.axis.bend": "Bend",
+  "pose.axis.twist": "Twist",
+  "pose.axis.splay": "Splay",
+  "pose.quickWaiting": "Waiting for the rider model — each move is a place to send a joint, so it needs the rig to know where that is.",
+  "pose.photo": "Photo",
+  "pose.photoHint": "The clean frame hides the dots and the panels. The photo is saved at twice the size of the panel — open the preview full screen for a bigger one.",
+  "pose.cleanFrame": "Clean frame",
+  "pose.savePhoto": "Save photo",
+  "pose.photoSaved": "Photo saved",
+  "pose.photoFailed": "Couldn't save the photo",
+  "pose.scene.studio": "Studio",
+  "pose.scene.white": "White",
+  "pose.scene.sky": "Daylight",
+  "pose.scene.sunset": "Sunset",
+  "pose.scene.dusk": "Dusk",
 
   // ── Rider studio ───────────────────────────────────────────────────────────
   "rider.help":
@@ -302,23 +349,58 @@ export const en = {
     "Couldn't finish: {{what}}. Windows needs your permission, or the download didn't arrive — you can install it by hand.",
   "runtime.repairNoGameFolder": "No game folder set",
   "runtime.repairNoGameFolderDesc":
-    "The runtimes are installed, but without the install folder there's nowhere to put the copy the game looks for. Set it above, then repair again.",
+    "The runtimes are installed, but without the install folder we can't check the game folder itself. Set it above, then repair again.",
   "runtime.repairFailed": "Couldn't repair the runtimes",
+  "runtime.strayForeign": "A file in your game folder ({{what}}) crashes MX Bikes.",
+  "runtime.strayLocked": "{{what}} in your game folder crashes MX Bikes.",
+  "runtime.strayPitch":
+    "It's what causes the \"R6034\" error at launch. Moving it aside fixes it, and deletes nothing.",
+  "runtime.strayLockedPitch":
+    "It's what causes the \"R6034\" error at launch. Close MX Bikes first, then move it aside.",
+  "runtime.strayFix": "Move it aside",
+  "runtime.strayFixHint":
+    "Renames it to msvcr90.dll.disabled so Windows stops loading it. Nothing is deleted.",
+  "runtime.strayClearing": "Moving…",
+  "runtime.strayCleared": "Moved out of the way",
+  "runtime.strayClearedDesc":
+    "It's now msvcr90.dll.disabled, in the same folder. Start MX Bikes again.",
+  "runtime.strayClearFailed": "Couldn't move the file",
   "update.checkFailed": "Couldn't check for updates",
   "update.failed": "Update failed",
 
   // ── 3D viewer ──────────────────────────────────────────────────────────────
   "viewer.preview3d": "3D Preview",
   "viewer.expand": "Expand",
+  "viewer.fullscreen": "Fullscreen",
+  "viewer.exitFullscreen": "Exit fullscreen",
   "viewer.paint": "Paint",
+  "viewer.tyres": "Tyres",
+  "viewer.tyresOwn": "Bike's own",
   "viewer.loadingModel": "Loading model…",
   "viewer.loadingPaint": "Loading paint…",
   "viewer.loadingRider": "Loading rider…",
   "viewer.riderLoadFailed": "Preview is out of date — it couldn't be updated",
+  "viewer.both": "Both",
+  "viewer.onBike": "On bike",
+  "viewer.noSeat": "This bike's setup file doesn't say where its seat is, so the rider can't be sat on it.",
+  "viewer.loadingBike": "Loading bike…",
+  "viewer.bikeLoadFailed": "Bike preview is out of date — it couldn't be updated",
   "viewer.dragToRotate": "Drag to rotate",
   "viewer.scrollToZoom": "Scroll to zoom",
   "viewer.rightDragToPan": "Right-drag to pan",
   "viewer.paintReloaded": "Paint reloaded",
+  "viewer.pose": "Pose",
+  "viewer.poseRear": "Rear",
+  "viewer.poseFront": "Front",
+  "viewer.poseSteer": "Steering",
+  "viewer.poseLevel": "Level wheels",
+  "viewer.poseReset": "Reset",
+  "viewer.place": "Placement",
+  "viewer.placeSide": "Side",
+  "viewer.placeUp": "Up",
+  "viewer.placeFwd": "Forward",
+  "viewer.placeTurn": "Turn",
+  "viewer.resizePanel": "Drag to resize · double-click to reset",
 
   // ── Combobox ───────────────────────────────────────────────────────────────
   "combobox.search": "Search…",
@@ -407,6 +489,26 @@ export const en = {
   "shop.sessionFailed": "Couldn't capture your MX Bikes Shop session",
   "shop.loadFailed": "Couldn't load your purchases: {{error}}",
   "shop.empty": "No purchased downloads found on your account yet.",
+
+  // ── MXB Hub (shop.mxb-hub.com — the marketplace mxbhub.com redirects to) ──
+  "hub.help":
+    "Browse the MXB Hub marketplace at shop.mxb-hub.com, and install what you already own. Buying still happens on the store's own site; sign in under My purchases to install your orders from here.",
+  "hub.count_one": "{{count}} item",
+  "hub.count_other": "{{count}} items",
+  "hub.searchPlaceholder": "Search MXB Hub…",
+  "hub.myDownloads": "My purchases",
+  "hub.signInTitle": "Sign in to MXB Hub",
+  "hub.signInBody":
+    "Log in to shop.mxb-hub.com to see and install everything you own, free mods included. We open the real site — your password never touches this app.",
+  "hub.signIn": "Sign in",
+  "hub.signedIn": "Signed in to MXB Hub",
+  "hub.sessionFailed": "Couldn't capture your MXB Hub session",
+  "hub.empty": "No downloads found on your MXB Hub account yet.",
+  "hubSort.newest": "Newest",
+  "hubSort.popular": "Most popular",
+  "hubSort.priceAsc": "Price: low to high",
+  "hubSort.priceDesc": "Price: high to low",
+  "hubSort.nameAsc": "Name (A–Z)",
   "purchases.count_one": "{{count}} purchase",
   "purchases.count_other": "{{count}} purchases",
   "purchases.fileCount_one": "{{count}} file",
@@ -488,6 +590,7 @@ export const en = {
   "installDialog.directFastest": "Direct · fastest",
   "installDialog.direct": "Direct",
   "installDialog.recommendedBadge": "Recommended",
+  "installDialog.matchedBadge": "Your bike",
   "installDialog.browserBadge": "Browser",
   "installDialog.serverBadge": "Server",
   "installDialog.serverBuildNote": "Dedicated server build — not for playing",
@@ -527,6 +630,7 @@ export const en = {
   "modDetail.stagePlace": "Place",
   "modDetail.stageReload": "Reload",
   "modDetail.modFiles": "Mod files",
+  "modDetail.loadFailed": "Couldn't load this mod",
   "modDetail.copied": "Copied",
   "modDetail.copy": "Copy",
   "modDetail.addToLibrary": "Add to Library",
@@ -547,6 +651,7 @@ export const en = {
   "modDetail.addedToLibrary": "Added to your library",
   "modDetail.extracting": "Extracting…",
   "modDetail.addingToLibrary": "Adding to library…",
+  "modDetail.chooseWhatToInstall": "Choose what to install",
   "modDetail.resolving": "Resolving download…",
   "modDetail.finishInBrowser": "Finish in your browser",
   "modDetail.viewOnSite": "View on {{site}}",
@@ -605,11 +710,13 @@ export const en = {
   "settings.updateCheckFailed":
     "Couldn't check for updates — offline or GitHub unavailable.",
   "settings.latestVersion": "Latest: {{version}}",
+  "settings.frostmodStrayMsvcr90":
+    "A file in your game folder crashes MX Bikes with \"R6034\" — move it aside to fix it.",
   "settings.frostmodRuntimeMissing":
     "Windows is missing a Visual C++ component FrostMod needs — install it to stop the \"dll was not found\" error.",
   "settings.repairRuntimes": "Repair runtimes",
   "settings.repairRuntimesHint":
-    "Installs every Visual C++ runtime this PC is short of (both 32- and 64-bit) and puts msvcr90.dll where the game looks for it. Worth running even if nothing above looks wrong.",
+    "Installs every Visual C++ runtime this PC is short of, both 32- and 64-bit, and clears out anything an older version of this app left in the game folder. Worth running even if nothing above looks wrong.",
   "settings.frostmodNeedsRepair":
     "The installed files don't match this version — reinstalling fixes it.",
   "settings.frostmodRepair": "Repair install",
@@ -751,7 +858,7 @@ export const en = {
   "sync.title": "Paint sync",
   "sync.desc":
     "MX Bikes never sends paints, so other riders show up in default liveries unless you already have their exact file. Publish yours and pull back everyone else's.",
-  "sync.enroll": "Enroll",
+  "sync.enroll": "Join public beta",
   "sync.enrolled": "Enrolled as {{name}}",
   "sync.enrollFailed": "Couldn't enroll",
   "sync.codePlaceholder": "Invite code",
@@ -778,7 +885,7 @@ export const en = {
     "Your GUID is picked up on its own the first time one of your servers sees you connect. Until then your rider name identifies you.",
   "sync.guidManual": "Enter it manually",
   "sync.whereCode":
-    "Paint sync is invite-only for now. Codes are handed out in the Discord — ask there and paste the one you're given above.",
+    "No invite is needed. This PC will publish your look and automatically fetch paints that other riders have already published.",
   "sync.getCode": "Ask in the Discord",
   "sync.sidebarOk": "Synced · {{count}} riders",
   "sync.sidebarUnpublished": "Your look isn't published",
@@ -852,7 +959,7 @@ export const en = {
   "viewer.stockGearNote":
     "Shown on the game's stock {{part}}. A paint made for a different model may not line up perfectly.",
   "viewer.paintNoChange":
-    "None of this paint's textures are used by the parts shown here, so the preview doesn't change. It may still paint the wheels or chain, which this view doesn't render.",
+    "None of this paint's textures are used by the parts shown here, so the preview doesn't change. It may still paint the chain, which this view doesn't render.",
   "viewer.noPaintPreview": "No paint preview ({{err}})",
 
   // ── Library (installed mods) ───────────────────────────────────────────────
@@ -864,10 +971,52 @@ export const en = {
   "library.searchPlaceholder": "Search installed…",
   "library.sortFolder": "By folder",
   "library.sortRecent": "Recently added",
+  "library.showRemoved": "Removed",
+  "library.showRemovedHint":
+    "Show mods this folder used to hold, including ones deleted outside the app",
+  "library.goneOn": "Removed {{date}}",
+  "library.goneNote": "kept so you can find them again",
+  "library.parkedHint": "Disabled in Manage — still on disk",
+  "library.parkedNote": "turn these back on in Manage",
+  "library.nothingRemoved":
+    "Nothing missing yet. From now on, anything you delete is remembered here.",
+  "library.reinstall": "Download again",
+  "library.copyName": "Copy name",
+  "library.copiedName": "Name copied",
+  "library.forget": "Forget this",
+  "library.forgetFailed": "Couldn't forget that",
+  "library.restore": "Restore",
+  "library.restored": "Put back",
+  "library.restoreFailed": "Couldn't restore that",
+  "library.findAgain": "Find it again",
+  "library.findAgainFor": "Searching every source for “{{name}}”.",
+  "library.findAgainNone": "Nothing by that name.",
+  "library.findAgainFailed": "Couldn't search this one.",
   "library.scanning": "Scanning your library…",
   "library.empty": "No {{type}} installed yet — head to Browse and add one.",
   "library.noMatches": "No matches.",
   "library.quick3d": "View in 3D",
+  "swapActions.menu": "Move or delete this model",
+  "swapActions.move": "Move to another bike…",
+  "swapActions.delete": "Delete model…",
+  "swapActions.activeFirst": "This is the active model — switch the bike to another model first",
+  "swapActions.stockHasNoFiles": "Stock isn't a model set — there's nothing on disk to move or delete",
+  "swapActions.moveTitle": "Move {{name}} to another bike",
+  "swapActions.moveBlurb": "The model files move. The bike keeps everything else.",
+  "swapActions.pickBike": "Choose a bike…",
+  "swapActions.liveriesTitle": "Take its liveries along?",
+  "swapActions.liveriesBlurb": "A paint is drawn for one bike's layout, so it rarely fits another. Anything you leave stays on this bike.",
+  "swapActions.moveConfirm": "Move",
+  "swapActions.moved": "Moved {{name}} to {{bike}}",
+  "swapActions.deleteTitle": "Delete {{name}}?",
+  "swapActions.deleteBlurb_one": "Its {{count}} file goes to the Trash. Any liveries stay on the bike.",
+  "swapActions.deleteBlurb_other": "Its {{count}} files go to the Trash. Any liveries stay on the bike.",
+  "swapActions.deleteConfirm": "Delete",
+  "swapActions.deleted": "{{name}} moved to the Trash",
+  "library.models_one": "{{count}} model",
+  "library.models_other": "{{count}} models",
+  "library.modelsHint": "Model swaps installed for this bike — switch between them in the Locker",
+  "library.modelIncomplete": "Incomplete",
   "library.selectNone": "Select none",
   "library.move": "Move",
   "library.uninstall": "Uninstall",
@@ -938,6 +1087,7 @@ export const en = {
     "Swap each bike's model and engine sound between the sets you've installed.",
   "locker.rescan": "Rescan",
   "locker.restore": "Restore",
+  "locker.hideOrphan": "Hide this warning",
   "locker.register": "Register",
   "locker.scanning": "Scanning bikes…",
   "locker.scanForSwaps": "Scan for swaps",
@@ -975,6 +1125,29 @@ export const en = {
   "locker.missingSoundFiles": "This set is missing engine.scl or sfx.cfg",
   "locker.switchTo": "Switch to {{name}}",
   "locker.preview3d": "See {{name}} in 3D — nothing is switched",
+  "locker.view3d": "View 3D",
+  "locker.paints": "Paints",
+  "locker.assignPaints": "Choose which liveries belong to {{name}}",
+  "locker.paintsClaimed_one": "{{count}} livery assigned to this model",
+  "locker.paintsClaimed_other": "{{count}} liveries assigned to this model",
+  "locker.paintsTitle": "Liveries for \u201c{{model}}\u201d",
+  "locker.paintsBlurb":
+    "Tick the liveries drawn for this model. They\u2019re the only ones offered while it\u2019s active, and liveries belonging to another model are moved out of the bike\u2019s paints folder so {{game}} stops listing them too. Leave a livery unticked everywhere and it stays available under every model.",
+  "locker.paintsFilter": "Search liveries\u2026",
+  "locker.paintsSelectAll": "Select all",
+  "locker.paintsClearAll": "Clear all",
+  "locker.paintsLoading": "Reading liveries\u2026",
+  "locker.paintsNone": "This bike has no liveries yet \u2014 install one and it\u2019ll show up here.",
+  "locker.paintsNoMatch": "No livery matches that.",
+  "locker.paintsAlsoOn": "Also assigned to {{models}}",
+  "locker.paintsSaved_one": "{{count}} livery assigned to \u201c{{model}}\u201d.",
+  "locker.paintsSaved_other": "{{count}} liveries assigned to \u201c{{model}}\u201d.",
+  "locker.paintsStuck_one":
+    "{{count}} livery file couldn\u2019t be moved \u2014 close {{game}} and rescan, or it stays visible in-game.",
+  "locker.paintsStuck_other":
+    "{{count}} livery files couldn\u2019t be moved \u2014 close {{game}} and rescan, or they stay visible in-game.",
+  "locker.paintsReselect": "Reselect your profile in {{game}} to see the new list.",
+  "locker.paintsNextLaunch": "The game will show the new list next time it opens.",
   "locker.tiedToModel": "Tied to model {{models}}",
   "locker.boundHint":
     "“{{sound}}” is tied to model “{{model}}” — it travels with that model. Click to untie.",
@@ -1056,6 +1229,7 @@ export const en = {
   "downloads.stageDownloading": "Downloading",
   "downloads.stageExtracting": "Extracting",
   "downloads.stagePlacing": "Installing",
+  "downloads.stageReview": "Waiting for you",
 
   // ── Downloads (history) ────────────────────────────────────────────────────
   "downloads.help":
@@ -1073,6 +1247,7 @@ export const en = {
   "downloads.yesterday": "Yesterday",
   "downloads.sourceSite": "Download",
   "downloads.sourceShop": "Shop",
+  "downloads.sourceHub": "MXB Hub",
   "downloads.sourceFile": "Imported file",
   "downloads.showInLibrary": "Show in library",
   "downloads.openModPage": "Open the mod's page",
@@ -1099,6 +1274,8 @@ export const en = {
   "category.misc": "Other",
 
   // ── Library/Rider section headers (plural) ─────────────────────────────────
+  "section.removed": "No longer installed",
+  "section.parked": "Parked by Manage",
   "section.bikePaint": "Liveries",
   "section.bikeModelSwap": "Model swaps",
   "section.sound": "Sounds",
@@ -1147,8 +1324,8 @@ export const en = {
   "overlay.fullscreenNowDesc": "The overlay still opens — the game is simply drawn over it. Switch to borderless or windowed in Options → Video.",
   "overlay.notWorking": "Pressed it and nothing happened?",
   "overlay.notWorkingDesc": "Check the shortcut above: another app may already own that combo, and picking a free one is what fixes it.",
-  // Voice chat — devices and levels. The transport that carries this to other riders
-  // isn't built yet; `voice.notConnected*` is what says so on the page.
+  // Voice chat — devices, levels, and who is in the room. Joining is not a control: the
+  // app is in voice because the rider is on a server, which is what these strings say.
   "voice.section": "Voice chat",
   "voice.enable": "Enable voice chat",
   "voice.microphone": "Microphone",
@@ -1176,7 +1353,13 @@ export const en = {
   "voice.deviceGone": "That device isn't connected",
   "voice.noDevices": "No audio devices found",
   "voice.notConnected": "Not connected to anyone yet",
-  "voice.notConnectedDesc": "These settings control your own microphone and headset, and the test buttons work today. Actually talking to other riders needs the voice server, which isn't built yet — nothing here transmits.",
+  "voice.notConnectedDesc": "Voice starts on its own when you join a server — there's nothing to set up, nothing to download, and nothing for the server to run. Anyone else on it with the app shows up here.",
+  "voice.inRoom": "In voice on {{server}}",
+  "voice.stopped": "Voice stopped",
+  "voice.unnamedRider": "Rider",
+  "voice.connecting": "connecting…",
+  "voice.mute": "Mute",
+  "voice.unmute": "Unmute",
   "overlay.pressKeys": "Press keys…",
   "overlay.needModifier": "Add a modifier",
   "overlay.needModifierDesc": "Hold Ctrl, Alt or Shift so the shortcut can't fire while you type.",
@@ -1201,6 +1384,78 @@ export const en = {
   "showcase.supporters.title_one": "Made possible by {{count}} supporter",
   "showcase.supporters.title_other": "Made possible by {{count}} supporters",
   "showcase.supporters.more": "+{{count}} more",
+  "showcase.v0113.hero.title":
+    "Every track opens as the place it is",
+  "showcase.v0113.hero.body":
+    "A track used to open as bare ground \u2014 the right ruts, berms and jump faces, but nothing standing on them, so a supercross floor and a national circuit read much the same. The viewer now draws what a track puts on itself: the tents and awnings, the hay bales and tyre walls, the banner lines and fencing, the trailers in the paddock, and the landscape beyond the track\u2019s own square.",
+  "showcase.v0113.sky":
+    "A track sits under its own sky, lit and hazed the way its own ambience file says it should be.",
+  "showcase.v0113.ground":
+    "The ground keeps its detail up close \u2014 the track\u2019s own dirt, with real relief where it ships a normal map for it.",
+  "showcase.v0113.pick":
+    "Click anything standing on the track and it lights up on its own, named and measured.",
+  "showcase.v0113.speed":
+    "It arrives in stages \u2014 the terrain first, then the shape of the scenery, then its colours \u2014 and opening the same track again skips the archive entirely.",
+  "showcase.v0112.hero.title":
+    "A bike pack installs as the bikes inside it",
+  "showcase.v0112.hero.body":
+    "The OEM pack is 54 machines in one 3.8 GB archive, and it used to arrive as a single row reading \u201cMods folder\u201d \u2014 all of it or none of it. It is now listed the way it is built: every bike by its real name and class, with a checkbox. Take the four you race and leave the other fifty.",
+  "showcase.v0112.fullscreen":
+    "The Designer's 3D preview opens fullscreen \u2014 one button fills the window with the model you are painting.",
+  "showcase.v0112.review":
+    "A download that turns out to hold several mods stops and shows you what is in it before anything reaches your mods folder.",
+  "showcase.v0112.paint":
+    "A paint that offers one file per machine now installs the one for the bike you picked, not the first on the page.",
+  "showcase.v0112.speed":
+    "The review sheet opens in about a second with the OEM bikes installed, where it used to take nearly twenty.",
+  "showcase.v0112.window":
+    "A black window on startup can no longer trap you: it stays hidden until it has drawn, and always has a way to close it.",
+  "showcase.v0111.hero.title":
+    "Protected model swaps open in 3D",
+  "showcase.v0111.hero.body":
+    "A model bought from a creator ships its mesh sealed, and the viewer couldn't read it — View 3D said the swap held no readable mesh, on a model that runs perfectly in game. It opens now, like any other bike.",
+  "showcase.v0111.messages":
+    "When a bike still won't open, the app names the fault it actually hit instead of blaming cloud sync for everything.",
+  "showcase.v0110.hero.title":
+    "Take hold of the rider and pose him",
+  "showcase.v0110.hero.body":
+    "Grab the rider's joints in the 3D preview and move him — hands, elbows, hips, feet. Quick moves stack, sliders fine-tune, and Riding position sits him on the bike. Preview only: nothing is written to the game.",
+  "showcase.v0110.designer":
+    "Mirror a layer through the bike, select several at once, snap while dragging, flip, and type exact positions.",
+  "showcase.v0110.wheels":
+    "Bikes render with their wheels on, and you choose which tyres they stand on.",
+  "showcase.v0110.speed":
+    "Tracks draw seven times faster, bikes open in 127 ms instead of 201, and mods install two at a time.",
+  "showcase.v0110.swaps":
+    "Move a model set to another bike or delete it, and view any swap in 3D from the Library.",
+  "showcase.v0102.hero.title":
+    "Liveries that belong to the model wearing them",
+  "showcase.v0102.hero.body":
+    "MX Bikes gives a bike one flat paints folder and knows nothing about model swaps, so a Yami mesh on a KTM offered every KTM livery too. Each model in the Locker now has a palette button — tick the liveries drawn for it and they become the only ones it offers, in MX Bikes' own paint picker as well as here.",
+  "showcase.v0102.packs":
+    "Liveries that arrived inside a model pack were installed but invisible. Opening that model's picker now adopts them, which is also what makes them work.",
+  "showcase.v0102.presets":
+    "The Presets livery dropdown offers only the liveries that suit the model the preset selects.",
+  "showcase.v0102.vcredist":
+    "On a freshly reset Windows the app closed the moment it launched, with no window and no log. The installer now puts Microsoft's Visual C++ runtime in before it writes the app.",
+  "showcase.v0102.msvcr90":
+    "A stray msvcr90.dll it won't delete on its own is no longer a silent crash: the app names the file and offers to disable it in one press.",
+  "showcase.v0102.paintsync":
+    "Paint sync sent the wrong bike's livery when two bikes shared a paint name — and helmet, goggle, boot and protection paints were never shared at all.",
+  "showcase.v0101.hero.title":
+    "Your library remembers what you deleted",
+  "showcase.v0101.hero.body":
+    "Delete a track and the app used to forget it had ever existed. It now keeps the name, the author, where it was and a picture of it — so the one you can't name months later is still there to find.",
+  "showcase.v0101.restore":
+    "Restore puts a mod the app deleted back where it came from, and “Find it again” searches mxb-mods and the Shop using the name it kept.",
+  "showcase.v0101.paints":
+    "A paint saved on disk now shows up in the running game — no alt-tab, no reselecting your profile.",
+  "showcase.v0101.r6034":
+    "A crash this app was causing is fixed: the copy of msvcr90.dll it planted made MX Bikes die with R6034. It now takes that copy back.",
+  "showcase.v0101.logs":
+    "Share logs packs the same archive as Save logs and hands you a link, instead of a file to go and upload.",
+  "showcase.v0101.bikes":
+    "Bikes you no longer ride can be cleared out of the Presets picker.",
   "showcase.v0100.hero.title": "The Designer sets up its own sheets",
   "showcase.v0100.hero.body":
     "It now builds the sheets a model needs, lays the bike's own plastics underneath to trace over, and opens a model in about a second instead of nearly twenty.",
@@ -1373,6 +1628,8 @@ export const en = {
   "drop.scanning": "Working out what this is…",
   "drop.found_one": "Found {{count}} item",
   "drop.found_other": "Found {{count}} items",
+  "drop.selectAll": "Select all",
+  "drop.selectNone": "Select none",
   "drop.reviewHint": "Check the destinations, then install.",
   "drop.install_one": "Install {{count}}",
   "drop.install_other": "Install {{count}}",
@@ -1407,6 +1664,7 @@ export const en = {
   "drop.kind.bikePaint": "Paint",
   "drop.kind.soundSet": "Sound",
   "drop.kind.riderGear": "Rider gear",
+  "drop.kind.tyres": "Tyres",
   "drop.kind.reshadePreset": "ReShade preset",
   "drop.kind.unknown": "Unknown",
   "drop.reason.modsTree": "Contains a full mods folder",
@@ -1421,6 +1679,7 @@ export const en = {
   "drop.reason.riderTexture": "Paints the rider body — an outfit",
   "drop.reason.gearTexture": "Paints a piece of rider gear",
   "drop.reason.reshadePreset": "Lists ReShade techniques",
+  "drop.reason.packLayout": "Filed here by the pack it came in",
   "drop.reason.unrecognised": "Not recognised — you'll need to place it",
 
   // ── Import (the same install flow, reached by picking instead of dropping) ──
@@ -1441,7 +1700,7 @@ export const en = {
   // ── Logs ───────────────────────────────────────────────────────────────────
   "settings.logs": "Logs",
   "logs.desc":
-    "The files to send when something goes wrong. MXB App, FrostMod and {{game}} each keep their own — open any of them, or save the lot as one zip to attach to a bug report.",
+    "The files to send when something goes wrong. MXB App, FrostMod and {{game}} each keep their own — open any of them, save the lot as one zip, or share it as a link to paste into a bug report.",
   "logs.appLogs": "MXB App",
   "logs.appLogsDesc": "What the app itself recorded",
   "logs.frostmodLogsDesc": "Whatever the loader wrote in its own folder",
@@ -1460,6 +1719,20 @@ export const en = {
   "logs.savedDesc_one": "{{count}} log file, {{size}}",
   "logs.savedDesc_other": "{{count}} log files, {{size}}",
   "logs.saveFailed": "Couldn't save the logs",
+  "logs.share": "Share logs",
+  "logs.sharePacking": "Packing…",
+  "logs.sharing": "Uploading…",
+  "logs.shared": "Logs uploaded",
+  "logs.sharedCopied": "{{size}} — the link is on your clipboard.",
+  "logs.sharedDesc": "{{size}} — the link is below.",
+  "logs.sharedSummary_one": "{{count}} log file, {{size}} uploaded.",
+  "logs.sharedSummary_other": "{{count}} log files, {{size}} uploaded.",
+  "logs.shareFailed": "Couldn't share the logs",
+  "logs.copyLink": "Copy link",
+  "logs.linkCopiedShort": "Copied",
+  "logs.linkCopied": "Link copied",
+  "logs.shareWarning":
+    "The zip sits on a public file host — anyone with the link can download it, so only hand it to whoever asked for it.",
   "logs.privacy":
     "Logs hold folder paths and what the app was doing — never your passwords or session cookies, and no settings file is included.",
 
@@ -1529,7 +1802,6 @@ export const en = {
   "paints.kind.bike": "Bike livery",
   "paints.kind.helmet": "Helmet",
   "paints.kind.goggles": "Goggles",
-  "paints.kind.profileGoggles": "Goggles (rider)",
   "paints.kind.boots": "Boots",
   "paints.kind.protection": "Protection",
   "paints.kind.kit": "Rider kit",
@@ -1564,10 +1836,19 @@ export const en = {
 
   // ── Designer (the layer editor) ───────────────────────────────────────────────
   "designer.help":
-    "Draw a paint on the sheets the game actually reads, and watch it on the model as you go. Start from an installed paint to get the sheet names right, paint on it with a brush, a gradient or a shape, stack images and text on top, then save — what comes out is a .pnt the game loads, not an export to convert.",
+    "Draw a paint on the sheets the game actually reads, and watch it on the model as you go. Pick a model and its sheets are already there under the names it binds — or start from an installed paint or a Photoshop file to bring artwork with you. Paint with a brush, a gradient or a shape, stack images and text on top, then save: what comes out is a .pnt the game loads, not an export to convert.",
   "designer.empty":
-    "Nothing to draw on yet. Start from a paint installed for this model to get its real sheets and their names, or add a blank one.",
+    "Nothing to draw on yet. Start from a paint installed for this model, open a Photoshop file to keep its layers, or add a blank sheet.",
   "designer.startFromPaint": "Start from a paint…",
+  "designer.startFromPsd": "Start from a PSD…",
+  "designer.exportPsd": "Export PSD",
+  "designer.exportPsdHint": "Write every sheet out as a layered .psd, into a folder you pick.",
+  "designer.exportedPsd_one": "Wrote 1 sheet to {{dir}}",
+  "designer.exportedPsd_other": "Wrote {{count}} sheets to {{dir}}",
+  "designer.sheetsSwitched": "Switched to the sheets {{dest}} uses.",
+  "designer.switchSheetsTitle": "These sheets are for another model",
+  "designer.switchSheetsBody": "{{dest}} uses {{names}}. Switching replaces every sheet you have open.",
+  "designer.switchSheets": "Switch sheets",
   "designer.blankSheet": "Blank sheet",
   "designer.addSheet": "Add a sheet",
   "designer.nothingToSave": "Every sheet is empty — draw something before saving.",
@@ -1621,6 +1902,56 @@ export const en = {
     "This area is the underside of the panel — painted here, it faces the ground and is never seen from outside.",
   "designer.faceHint.both":
     "A panel's outer skin and its underside share this area, so anything drawn here lands on both.",
+  // ── Designer › the selection, and what can be done to it ──────────────────────
+  "designer.layersSelected": "{{count}} layers selected",
+  "designer.position": "Position",
+  "designer.duplicate": "Duplicate",
+  "designer.copy": "Copy",
+  "designer.paste": "Paste",
+  "designer.copyName": "{{name}} copy",
+  "designer.copied_one": "1 layer copied.",
+  "designer.copied_other": "{{count}} layers copied.",
+  "designer.pasteWrongSize":
+    "That was copied from a sheet of another size, and a paint layer is the sheet — there's nothing here it would fit.",
+  "designer.pasteDropped_one":
+    "1 paint layer was left out — a paint layer is the sheet, and this one is a different size.",
+  "designer.pasteDropped_other":
+    "{{count}} paint layers were left out — a paint layer is the sheet, and this one is a different size.",
+  "designer.group": "Group",
+  "designer.ungroup": "Ungroup",
+  "designer.groupRow": "Together",
+  "designer.groupOf": "Group of {{count}}",
+  "designer.groupHint":
+    "Move these as one. Clicking any of them takes the whole group — hold Alt to pick a single layer out of it.",
+  "designer.flip": "Flip",
+  "designer.flipX": "Flip left to right",
+  "designer.flipY": "Flip top to bottom",
+
+  // ── Designer › mirroring to the far flank ─────────────────────────────────────
+  "designer.mirror": "Mirror to other side",
+  "designer.mirrorName": "{{name}} mirrored",
+  "designer.mirrorHint":
+    "Put a copy of this layer where it lands on the far side of the bike. Worked out from the model rather than by flipping the sheet, so it arrives on the panel it belongs on — and it follows this layer until you unlink it.",
+  "designer.mirroredFrom": "Mirrored from “{{name}}”.",
+  "designer.mirroredShort": "Mirrored",
+  "designer.mirroredOrphan": "This was mirrored from a layer that is no longer here.",
+  "designer.unlink": "Unlink",
+  "designer.unlinkHint":
+    "Stop following, and keep what's here. It becomes an ordinary layer you can edit on its own.",
+  "designer.selectSource": "Select the original",
+  "designer.mirrorPaused":
+    "No model is loaded, so this is sitting where it was last placed rather than following.",
+  "designer.mirrorRough":
+    "The far side isn't unwrapped as a reflection of this one, so the placement is close rather than exact.",
+  "designer.mirrorWhy.no-model":
+    "Load the bike in the preview first — without the model there is no far side to find.",
+  "designer.mirrorWhy.shared":
+    "Both flanks are unwrapped onto this same spot, so this is already on each side of the bike. A second copy would land on top of the first.",
+  "designer.mirrorWhy.centre":
+    "This sits on the bike's centre line, which is its own reflection — there is no other side to send it to.",
+  "designer.mirrorWhy.asymmetric":
+    "The model has nothing at the reflection of this spot, so there is no far side to put it on.",
+
   "designer.opacity": "Opacity",
   "designer.blend": "Blend",
   "designer.blend.normal": "Normal",
@@ -1653,6 +1984,12 @@ export const en = {
     "Only bikes can say which textures are their own. A helmet wears whichever paint it shipped with, and that isn't a stock look to trace.",
   "designer.stockNoMatch":
     "This model carries no texture of its own called “{{name}}”, so there's nothing of the bike's to show under this sheet.",
+  "designer.stockAsBase": "Stock as base",
+  "designer.stockAsBaseHint":
+    "Paint the bike's own texture into this sheet at full strength — the stock look as your starting point, a number away from being a paint. Unlike the reference above, this one is part of what you save.",
+  "designer.stockAsBaseDone":
+    "“{{name}}” now holds the bike's own texture — put your number on it and save.",
+  "designer.stockReadFailed": "Couldn't read the model's own “{{name}}” texture.",
   "designer.uvMap": "UV map",
   "designer.uvHint":
     "Show where the model's bodywork lands on this sheet, each piece in its own colour.",
@@ -1678,7 +2015,7 @@ export const en = {
   "designer.tool.ellipse": "Ellipse",
   "designer.tool.line": "Line",
   "designer.moveHint":
-    "Drag layers on the sheet to place them. Pick a tool above to paint on it instead.",
+    "Drag layers on the sheet to place them, and they snap to the seams and to each other — hold Alt to place one freely. Shift-click adds to the selection, a drag over empty space lassoes, and right-click has the rest. Pick a tool above to paint on it instead.",
   "designer.colourFrom": "Paint with this",
   "designer.colourTo": "Run into this",
   "designer.swapColours": "Swap the two colours",
@@ -1708,6 +2045,18 @@ export const en = {
   "trackViewer.surface": "Surface",
   "trackViewer.surfaceMasks": "From the track's surface data",
   "trackViewer.relief": "Elevation range",
+  "trackViewer.objects": "Objects",
+  "trackViewer.painting": "Painting…",
+  "trackViewer.scenery": "Scenery",
+  "trackViewer.sceneryTris": "{{count}} triangles",
+  "trackViewer.fixtures": "Marked fixtures",
+  "trackViewer.pieces": "Separable pieces",
+  "trackViewer.selected": "Selected piece",
+  "trackViewer.place": "Place a model",
+  "trackViewer.placePick": "Pick a model, then click the ground.",
+  "trackViewer.placeHint": "Click the ground to put it down.",
+  "trackViewer.placedCount": "{{count}} placed",
+  "trackViewer.saveProps": "Save .scr",
   "trackViewer.noTerrain": "No terrain to show",
   "trackViewer.noTerrainHint":
     "This track's height data isn't in a layout the viewer can read yet.",
@@ -1761,4 +2110,41 @@ export const en = {
   "integrity.gridRecovered": "(earlier this session)",
   "integrity.gridNote":
     "Only riders running MXB App with sharing turned on appear here. Somebody missing from this list hasn't been cleared — they simply haven't reported.",
+  /* ── Protect: lock content to a GUID ─────────────────────────────────── */
+  "nav.protect": "Protect",
+  "protect.help": "Lock the files you've made to the GUIDs of the people allowed to load them. A locked file only opens on the install whose GUID it carries, so one buyer means one copy: pick the files once, paste the GUIDs, and you get a folder per buyer. Your originals are only ever read.",
+  "protect.ownTitle": "Your GUID",
+  "protect.ownDesc": "The identity MX Bikes knows you by. It isn't in any file — Steam hands it over when you sign in — so the app reads it out of the running game.",
+  "protect.ownUnknown": "Not known yet",
+  "protect.readOwn": "Read from game",
+  "protect.copy": "Copy",
+  "protect.copied": "Copied",
+  "protect.useMine": "Add to the list",
+  "protect.ownFound": "Your GUID is {{guid}}",
+  "protect.ownNotFound": "Couldn't read your GUID",
+  "protect.ownNotFoundWhy": "Start MX Bikes and sign in to Steam, then try again.",
+  "protect.ownFailed": "Reading your GUID failed",
+  "protect.filesTitle": "Files to lock",
+  "protect.filesDesc": "Add single files, or a folder to take everything inside it. A .pkz is locked as an archive; anything else is locked on its own.",
+  "protect.addFiles": "Add files",
+  "protect.addFolder": "Add folder",
+  "protect.clear": "Clear",
+  "protect.summary": "{{files}} files · {{size}}",
+  "protect.summarySkipped": "{{count}} skipped",
+  "protect.planFailed": "Couldn't read that selection",
+  "protect.skipJunk": "Skipped",
+  "protect.skipEmpty": "Empty",
+  "protect.skipProtected": "Already protected",
+  "protect.guidsTitle": "Lock to",
+  "protect.guidsDesc": "One GUID per line — one folder comes out per GUID. Every copy gets its own key, so two buyers can't tell they hold the same file.",
+  "protect.guidsPlaceholder": "FF0110000108D7CFE3",
+  "protect.guidBad": "Not a GUID — 18 hex characters",
+  "protect.outTitle": "Where to put them",
+  "protect.outDesc": "A folder per GUID is created here, holding the files at the paths they already had. Your originals aren't touched.",
+  "protect.outPlaceholder": "Choose a folder",
+  "protect.browse": "Browse",
+  "protect.lock": "Lock {{files}} files for {{guids}} GUIDs",
+  "protect.done": "Locked {{files}} files for {{guids}} GUIDs",
+  "protect.failed": "Locking failed",
+  "protect.showFolder": "Show folder",
 } as const;

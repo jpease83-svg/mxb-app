@@ -9,6 +9,7 @@ import Servers from "../Servers/Servers";
 import Studio, { type StudioTab } from "../Studio/Studio";
 import Browse from "../Browse/Browse";
 import Shop from "../Shop/Shop";
+import Hub from "../Hub/Hub";
 import ModDetail from "../ModDetail/ModDetail";
 import DropZone from "../Dropzone/DropZone";
 import Settings, { type SectionId } from "../Settings/Settings";
@@ -36,6 +37,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
   // A preset handed off from the Presets tab to load in the Rider tab (its
   // "View in Rider" button). Consumed once by the Rider view, then cleared.
   const [riderPreset, setRiderPreset] = useState<Loadout | null>(null);
+  const [riderBike, setRiderBike] = useState<string | null>(null);
   // Which Studio sub-view is open. Here rather than inside `Studio` because two things
   // outside it open the Studio *at* a sub-view — Presets' "View in Rider", and the tour.
   const [studioTab, setStudioTab] = useState<StudioTab>("designer");
@@ -127,9 +129,23 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
   );
   const clearLibraryFocus = useCallback(() => setLibraryFocus(null), []);
 
+  // The other direction: from a mod the Library only *remembers* to the catalog page it
+  // could be downloaded from again. The category comes from the tab being browsed, the same
+  // fallback the detail view uses when nothing more specific is known.
+  const openFoundMod = useCallback(
+    (slug: string) => {
+      openMod(slug, modType.categoryId);
+      navigate("browse");
+    },
+    [openMod, modType.categoryId, navigate],
+  );
+
   // Jump from Presets into the Rider tab with a preset loaded, to view it on the model.
-  const openInRider = useCallback((lo: Loadout) => {
+  const openInRider = useCallback((lo: Loadout, bike: string) => {
     setRiderPreset(lo);
+    // The bike rides along: a loadout names a livery and a model swap but never the bike
+    // they belong to, so without this the Rider tab would dress whichever bike it landed on.
+    setRiderBike(bike);
     navigate("studio", "rider");
   }, [navigate]);
   const clearRiderPreset = useCallback(() => setRiderPreset(null), []);
@@ -138,10 +154,12 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
     <TourContext.Provider value={{ startTour }}>
     {/* Outside the installers: both of them write to the history, and the sidebar reads it. */}
     <DownloadsProvider>
+    {/* Above the installer, not below it: a *download* stages a plan too now — a pack like
+        the OEM bikes arrives as fifty-five mods in one archive — so `InstallProvider` has to
+        be able to hand one over. It wraps the views for the same reason it always did: a drop
+        anywhere in the window and the Shop's purchases grid both finish in this one sheet. */}
+    <DropReviewProvider onInstalled={onInstalled}>
     <InstallProvider onInstalled={onInstalled} onOpenMod={openModTarget}>
-      {/* Wraps the views because two of them stage plans: a drop anywhere in the window, and
-          the Shop's purchases grid. Both finish in the one review sheet this renders. */}
-      <DropReviewProvider onInstalled={onInstalled}>
       {/* Mounted here rather than in `App` so a drop only works once the app is set up —
           there is nowhere to install to before the MX Bikes folder is known. The overlay
           window renders its own tree and deliberately gets no drop target. */}
@@ -168,6 +186,8 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
             />
           ) : view === "shop" ? (
             <Shop refreshKey={libraryVersion} />
+          ) : view === "hub" ? (
+            <Hub refreshKey={libraryVersion} />
           ) : view === "library" ? (
             <Library
               modType={modType}
@@ -176,12 +196,14 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
               onChanged={onInstalled}
               focus={libraryFocus}
               onFocusApplied={clearLibraryFocus}
+              onOpenMod={openFoundMod}
             />
           ) : view === "downloads" ? (
             <Downloads
               onOpenMod={openModTarget}
               onShowInLibrary={showInLibrary}
               onOpenShop={() => navigate("shop")}
+              onOpenHub={() => navigate("hub")}
             />
           ) : view === "locker" ? (
             <Locker />
@@ -196,6 +218,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
               tab={studioTab}
               onTab={setStudioTab}
               riderPreset={riderPreset}
+              riderBike={riderBike}
               onRiderPresetLoaded={clearRiderPreset}
             />
           ) : view === "servers" ? (
@@ -220,8 +243,8 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
           onOpenSettings={openSettingsSection}
         />
       )}
-      </DropReviewProvider>
-    </InstallProvider>
+      </InstallProvider>
+    </DropReviewProvider>
     </DownloadsProvider>
     </TourContext.Provider>
   );

@@ -12,6 +12,7 @@ import {
   Gamepad2,
   SlidersHorizontal,
   Store,
+  ShoppingBag,
   Palette,
   PanelLeftClose,
   PanelLeftOpen,
@@ -35,12 +36,14 @@ import {
 import { useGameRunning } from "../../lib/useGameRunning";
 import { useConfig } from "../../Context/Config";
 import type { GameCaps } from "../../types";
+import { ATTACH_PROBLEM } from "../../types";
 import JoinServerDialog from "./JoinServerDialog";
 import DownloadQueue from "./DownloadQueue";
 
 export type DashboardView =
   | "browse"
   | "shop"
+  | "hub"
   | "library"
   | "downloads"
   | "locker"
@@ -102,6 +105,16 @@ const NAV: NavEntry[] = [
  * hides the Catalog half in that case and opens on purchases.
  */
 const SHOP_ENTRY: NavEntry = { id: "shop", label: "nav.shop", icon: Store, cap: "shop" };
+
+/**
+ * MXB Hub — the other store, and the same reasoning as the entry above: it sells MX Bikes
+ * mods, so it has nothing to offer a player on another title.
+ *
+ * Its own entry rather than a third tab inside Shop. The two are separate storefronts with
+ * separate accounts and separate carts, and folding them into one view would mean a sign-in
+ * that silently means a different thing depending on which pill is lit.
+ */
+const HUB_ENTRY: NavEntry = { id: "hub", label: "nav.hub", icon: ShoppingBag, cap: "shop" };
 
 /** Shown only when the experimental features are on — see `settings.experimental`.
  *  Also capability-gated: it administers MX Bikes dedicated servers and keys riders by
@@ -216,7 +229,11 @@ function NavRow({
 
 export default function Sidebar({ view, onNavigate }: SidebarProps) {
   const t = useT();
-  const { running, reload, status, start, stop } = useFrostmod();
+  const { running, attachment, reload, status, start, stop } = useFrostmod();
+  // FrostMod is up but isn't reaching the game — see `frostmod::attachment`. The good
+  // states (and the grace period after a launch) deliberately look like plain "Running".
+  const attachProblem =
+    attachment !== null && ATTACH_PROBLEM.includes(attachment.state);
   const { unseenFailures } = useDownloads();
   const { running: gameRunning, refresh: refreshGame } = useGameRunning();
   const { game } = useConfig();
@@ -278,7 +295,7 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
   // Two independent gates: servers needs the experimental toggle, and every entry needs the
   // active game to support it. Built here rather than inline so the JSX stays one `.map`.
   const supported = ({ cap }: NavEntry) => !cap || caps[cap];
-  const nav = [NAV[0], SHOP_ENTRY, ...NAV.slice(1), ...(experimental ? [EXPERIMENTAL_NAV] : [])]
+  const nav = [NAV[0], SHOP_ENTRY, HUB_ENTRY, ...NAV.slice(1), ...(experimental ? [EXPERIMENTAL_NAV] : [])]
     .filter(supported)
     .map((e) => (e.children ? { ...e, children: e.children.filter(supported) } : e));
 
@@ -508,14 +525,20 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
         {caps.frostmod && (
         <div
           data-tour="frostmod"
+          // A running FrostMod that never got into the game is the state this pill used
+          // to report as plain "Running", which is exactly as far as the player could get
+          // in working out why nothing was happening in game. The reason goes in the
+          // tooltip whether or not the sidebar is collapsed.
           title={
-            collapsed
-              ? running === null
-                ? t("frostmod.checking")
-                : running
-                  ? t("frostmod.running")
-                  : t("frostmod.notRunning")
-              : undefined
+            attachProblem
+              ? attachment?.reason
+              : collapsed
+                ? running === null
+                  ? t("frostmod.checking")
+                  : running
+                    ? t("frostmod.running")
+                    : t("frostmod.notRunning")
+                : undefined
           }
           className={cn(
             "flex items-center rounded-[10px] border border-white/[0.07] py-2",
@@ -525,16 +548,27 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
           <span
             className={cn(
               "size-[7px] flex-none rounded-full",
-              running ? "bg-success" : "bg-muted-foreground/50",
+              attachProblem
+                ? "bg-warning"
+                : running
+                  ? "bg-success"
+                  : "bg-muted-foreground/50",
             )}
           />
           {!collapsed && (
-            <span className="flex-1 text-[11.5px] text-muted-foreground">
-              {running === null
-                ? t("frostmod.checking")
-                : running
-                  ? t("frostmod.running")
-                  : t("frostmod.notRunning")}
+            <span
+              className={cn(
+                "flex-1 text-[11.5px]",
+                attachProblem ? "text-warning" : "text-muted-foreground",
+              )}
+            >
+              {attachProblem
+                ? t("frostmod.notInGame")
+                : running === null
+                  ? t("frostmod.checking")
+                  : running
+                    ? t("frostmod.running")
+                    : t("frostmod.notRunning")}
             </span>
           )}
           {running ? (

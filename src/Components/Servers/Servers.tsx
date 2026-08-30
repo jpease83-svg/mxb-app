@@ -12,12 +12,10 @@ import {
   Download,
   Upload,
   Globe,
-  MessagesSquare,
   Shirt,
   TriangleAlert,
   Server as ServerIcon,
 } from "lucide-react";
-import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { Badge } from "@/Components/ui/badge";
 import HelpHint from "@/Components/ui/help-hint";
 import { Button } from "@/Components/ui/button";
@@ -32,7 +30,6 @@ import {
   fleetState,
   joinServer,
   listServers,
-  onEnrollLink,
   onSyncEvent,
   parsePairing,
   presetsListProfiles,
@@ -62,9 +59,6 @@ import { useT, type TFunc } from "../../i18n/context";
 
 /** How often a server's status refreshes while the page is open. */
 const POLL_MS = 10000;
-
-/** Invite codes are issued by hand, and this is where they're handed out. */
-const DISCORD_URL = "https://discord.gg/3994Rr3ywb";
 
 /** `93784` -> `1d 2h`, `3720` -> `1h 2m`, `45` -> `45s`. */
 function uptime(secs: number): string {
@@ -443,7 +437,6 @@ const StatusRow = ({
 const PaintSync = () => {
   const t = useT();
   const [state, setState] = useState<ExperimentalState | null>(null);
-  const [code, setCode] = useState("");
   const [riderName, setRiderName] = useState("");
   const [guid, setGuid] = useState("");
   const [busy, setBusy] = useState(false);
@@ -466,21 +459,12 @@ const PaintSync = () => {
     presetsListProfiles()
       .then((scan) => {
         setProfiles(scan.profiles);
-        // One profile is the overwhelmingly common case — preselect it so enrolling is the
-        // invite code and nothing else.
+        // One profile is the overwhelmingly common case — preselect it so joining the
+        // public beta is one click.
         if (scan.profiles.length > 0)
           setRiderName((cur) => cur || scan.profiles[0]);
       })
       .catch(() => setProfiles([]));
-  }, []);
-
-  // An invite arriving as a clicked `mxb://` link rather than a code to transcribe. This
-  // fills the field and stops there — enrolling stays a button the player presses.
-  useEffect(() => {
-    const pending = onEnrollLink(setCode);
-    return () => {
-      void pending.then((unlisten) => unlisten());
-    };
   }, []);
 
   // Follow the background work. Publishing happens off a preset apply, a launch, or the game
@@ -503,9 +487,8 @@ const PaintSync = () => {
   const enroll = async () => {
     setBusy(true);
     try {
-      const name = await enrollAccount(code.trim(), riderName.trim());
+      const name = await enrollAccount("", riderName.trim());
       toast.success(t("sync.enrolled", { name }));
-      setCode("");
       refresh();
     } catch (e) {
       toast.error(t("sync.enrollFailed"), { description: String(e) });
@@ -760,36 +743,21 @@ const PaintSync = () => {
               spellCheck={false}
             />
           )}
-          <Input
-            value={code}
-            onChange={(e) => setCode(e.target.value)}
-            placeholder={t("sync.codePlaceholder")}
-            spellCheck={false}
-          />
           <p className="text-[11.5px] text-muted-foreground">
             {profiles && profiles.length === 0
               ? t("sync.noProfiles")
               : t("sync.pickProfileHint")}
           </p>
-          {/* Where the code comes from. Invites are issued by hand, so without this the
-              field is a box with no answer anywhere in the app. */}
           <p className="text-[11.5px] text-muted-foreground">
             {t("sync.whereCode")}
           </p>
           <div className="flex flex-wrap items-center gap-2 pt-1">
             <Button
               size="sm"
-              disabled={busy || !code.trim() || !riderName.trim()}
+              disabled={busy || !riderName.trim()}
               onClick={() => void enroll()}
             >
               {t("sync.enroll")}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => void openUrl(DISCORD_URL)}
-            >
-              <MessagesSquare className="size-3.5" /> {t("sync.getCode")}
             </Button>
           </div>
         </div>

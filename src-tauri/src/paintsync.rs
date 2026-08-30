@@ -17,7 +17,7 @@ use std::path::{Component, Path, PathBuf};
 
 /// Where the control plane lives. A constant rather than a setting: pointing the app at
 /// another host would let anything served there write files into the mods folder.
-pub const CONTROL_PLANE: &str = "https://mxb-control-plane.aui-svi.workers.dev";
+pub const CONTROL_PLANE: &str = "https://amx-paint-sync.jpease83-amx.workers.dev";
 
 /// Set to a base URL to talk to a control plane other than the real one. **Debug builds
 /// only** — see [`control_plane`].
@@ -51,6 +51,14 @@ pub fn control_plane() -> String {
 /// Only `.pnt` files are shared. Models are directories and often large, and none of the
 /// non-paint slots carry a file a receiver could use.
 const PAINT_EXT: &str = "pnt";
+
+/// Does this path name a paint? Extension only — the bytes are the decoder's business.
+pub fn is_paint(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case(PAINT_EXT))
+        .unwrap_or(false)
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -236,7 +244,7 @@ pub const MAX_BIKES: usize = 32;
 /// Read every bike in a profile and hash what each one is wearing.
 ///
 /// One `profile.ini` parse ([`presets::read_all_loadouts`]) and one library walk
-/// ([`bundle::plan_many`]) for the whole profile — doing either per bike turns publishing
+/// ([`bundle::plan_profile`]) for the whole profile — doing either per bike turns publishing
 /// into dozens of recursive scans of a folder holding every livery the player owns.
 pub fn local_look(cfg: &AppConfig, profile: &str) -> anyhow::Result<LocalLook> {
     let profiles_dir = cfg.profiles_dir();
@@ -251,7 +259,7 @@ pub fn local_look(cfg: &AppConfig, profile: &str) -> anyhow::Result<LocalLook> {
     let skipped = loadouts.len().saturating_sub(MAX_BIKES);
     loadouts.truncate(MAX_BIKES);
 
-    let plans = bundle::plan_many(cfg, &loadouts.iter().map(|(_, l)| l.clone()).collect::<Vec<_>>());
+    let plans = bundle::plan_many_for_bikes(cfg, &loadouts);
 
     let mut sources = std::collections::HashMap::new();
     let mut oversized = 0usize;
@@ -304,12 +312,7 @@ fn paints_of(
             continue;
         }
         let path = Path::new(&asset.abs_path);
-        let is_paint = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(|e| e.eq_ignore_ascii_case(PAINT_EXT))
-            .unwrap_or(false);
-        if !is_paint {
+        if !is_paint(path) {
             continue;
         }
         // A slot the control plane does not store is not worth failing a publish over.
@@ -517,6 +520,39 @@ pub fn server_key_for(servers: &[RegisteredServer], address: &str) -> String {
         .unwrap_or(wanted)
 }
 
+/// Resolve the server name FrostMod observed from `EventInit` to one registry row.
+///
+/// Names are not globally unique, so ambiguity deliberately returns `None`; the caller then
+/// falls back to the broad registry sync instead of putting a rider in the wrong roster.
+pub fn server_key_for_name(servers: &[RegisteredServer], name: &str) -> Option<String> {
+    let wanted = name.trim();
+    if wanted.is_empty() {
+        return None;
+    }
+    let mut matches = servers
+        .iter()
+        .filter(|s| s.name.trim().eq_ignore_ascii_case(wanted));
+    let first = matches.next()?;
+    matches.next().is_none().then(|| first.id.clone())
+}
+
+/// A stable roster key for a server FrostMod observed through MX Bikes' own browser.
+///
+/// Community hosts such as CBR do not need to run our server agent or appear in our
+/// registry. Riders who see the same server name and track derive the same opaque key, while
+/// the hash keeps arbitrary display text out of URLs and database grouping keys.
+pub fn session_server_key(name: &str, track_id: &str) -> Option<String> {
+    let name = name.trim().to_lowercase();
+    let track_id = track_id.trim().to_lowercase();
+    if name.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "session-{}",
+        sha256_bytes(format!("v1\0{name}\0{track_id}").as_bytes())
+    ))
+}
+
 #[derive(Deserialize)]
 struct RosterRider {
     #[serde(rename = "riderName")]
@@ -530,6 +566,9 @@ struct RosterRider {
 struct Roster {
     riders: Vec<RosterRider>,
 }
+
+/// A capped catalog of recently published riders, independent of live server presence.
+pub const CATALOG_SCOPE: &str = "catalog";
 
 /// Identity for de-duplication: the GUID where the rider has claimed one, their name
 /// otherwise. The same order of preference the control plane groups by, so the two agree
@@ -560,9 +599,13 @@ pub async fn pull(cfg: &AppConfig, token: &str, server_ids: &[String]) -> anyhow
     let mut reached = 0usize;
 
     for server_id in server_ids {
-        let roster: Roster = match http
-            .get(format!("{}/v1/roster", control_plane()))
-            .query(&[("server", server_id.as_str())])
+        let request = if server_id == CATALOG_SCOPE {
+            http.get(format!("{}/v1/catalog", control_plane()))
+        } else {
+            http.get(format!("{}/v1/roster", control_plane()))
+                .query(&[("server", server_id.as_str())])
+        };
+        let roster: Roster = match request
             .bearer_auth(token)
             .send()
             .await
@@ -572,7 +615,7 @@ pub async fn pull(cfg: &AppConfig, token: &str, server_ids: &[String]) -> anyhow
             // One unreachable roster shouldn't sink the others — the player still wants the
             // paints for the servers that did answer.
             Err(e) => {
-                log::warn!("[sync] roster for {server_id} failed: {e}");
+                log::warn!("[sync] paint list for {server_id} failed: {e}");
                 continue;
             }
         };
@@ -832,6 +875,37 @@ mod tests {
     fn falls_back_to_the_normalized_address_when_unregistered() {
         assert_eq!(server_key_for(&registry(), "192.0.2.1"), "192.0.2.1:54210");
         assert_eq!(server_key_for(&[], "192.0.2.1:6000"), "192.0.2.1:6000");
+    }
+
+    #[test]
+    fn matches_the_unique_server_name_frostmod_observed() {
+        assert_eq!(
+            server_key_for_name(&registry(), "  eu 1 "),
+            Some("eu-frankfurt-1".into())
+        );
+        assert_eq!(server_key_for_name(&registry(), "missing"), None);
+    }
+
+    #[test]
+    fn refuses_to_guess_between_duplicate_server_names() {
+        let mut servers = registry();
+        servers.push(RegisteredServer {
+            id: "eu-frankfurt-2".into(),
+            name: "EU 1".into(),
+            region: "eu".into(),
+            address: "203.0.113.11".into(),
+        });
+        assert_eq!(server_key_for_name(&servers, "EU 1"), None);
+    }
+
+    #[test]
+    fn community_sessions_share_a_stable_opaque_roster_key() {
+        let key = session_server_key("  AMX Series ", "755 Compound").unwrap();
+        assert_eq!(key, session_server_key("amx series", "755 compound").unwrap());
+        assert!(key.starts_with("session-"));
+        assert_eq!(key.len(), "session-".len() + 64);
+        assert_ne!(key, session_server_key("AMX Series", "Farm 14").unwrap());
+        assert_eq!(session_server_key("  ", "Farm 14"), None);
     }
 
     #[test]

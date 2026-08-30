@@ -153,10 +153,64 @@ fn on_webview() -> bool {
 /// `GET` with backoff over the transient blocks above. Transport errors retry too, which
 /// is what `install::get_with_retry` already does for download hosts.
 async fn get_with_retry(url: &str, params: &[(&str, String)]) -> anyhow::Result<Fetched> {
+    get(url, params, Want::Api).await
+}
+
+/// `GET` a rendered page, asked for the way a browser asks for one.
+///
+/// Its own entry point because Cloudflare guards the rendered pages far more tightly than the
+/// JSON API — a user whose catalog browses fine can still be refused the moment they open a
+/// single mod, which is the whole shape of this failure.
+async fn get_page(url: &str) -> anyhow::Result<Fetched> {
+    get(url, &[], Want::Page).await
+}
+
+/// Which shape of request this is, and therefore what it has to look like on the wire.
+#[derive(Clone, Copy)]
+enum Want {
+    /// The WP REST API. Script asks for these in a browser, and [`client`]'s default headers
+    /// already say exactly that.
+    Api,
+    /// A rendered page. A browser *navigates* to these — see [`page_headers`] for the HTTP
+    /// client and [`crate::mxb_fetch::read_page`] for the WebView.
+    Page,
+}
+
+/// The headers a browser sends when it navigates to a page, replacing the JSON-fetch defaults
+/// [`build_client`] sets.
+///
+/// Those defaults describe a same-origin `fetch` for JSON, which is what every REST call is.
+/// Sending them for a rendered page asks Cloudflare to believe a script wanted an HTML
+/// document — a shape no browser produces, on the one path its bot rules actually guard.
+fn page_headers() -> reqwest::header::HeaderMap {
+    use reqwest::header::{HeaderMap, HeaderValue};
+    let mut headers = HeaderMap::new();
+    for (k, v) in [
+        (
+            "accept",
+            "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,\
+             image/apng,*/*;q=0.8",
+        ),
+        ("sec-fetch-mode", "navigate"),
+        ("sec-fetch-dest", "document"),
+        // A page reached by clicking a link on the site, which is what this stands in for.
+        ("sec-fetch-site", "same-origin"),
+        ("sec-fetch-user", "?1"),
+        ("upgrade-insecure-requests", "1"),
+    ] {
+        headers.insert(k, HeaderValue::from_static(v));
+    }
+    headers
+}
+
+async fn get(url: &str, params: &[(&str, String)], want: Want) -> anyhow::Result<Fetched> {
     if on_webview() {
         // No backoff loop here: the bridge is a real browser, so a 429/503 it gets is one
         // the site means, and it has its own timeout.
-        return crate::mxb_fetch::get(url, params).await;
+        return match want {
+            Want::Api => crate::mxb_fetch::get(url, params).await,
+            Want::Page => crate::mxb_fetch::read_page(url).await,
+        };
     }
 
     const ATTEMPTS: u32 = 3;
@@ -164,7 +218,12 @@ async fn get_with_retry(url: &str, params: &[(&str, String)]) -> anyhow::Result<
     let mut last_err: Option<anyhow::Error> = None;
     for attempt in 1..=ATTEMPTS {
         let started = Instant::now();
-        match client.get(url).query(params).send().await {
+        let req = client.get(url).query(params);
+        let req = match want {
+            Want::Api => req,
+            Want::Page => req.headers(page_headers()),
+        };
+        match req.send().await {
             Ok(resp) if !worth_retrying(resp.status()) => {
                 // Debug, not info: search runs on every keystroke, and a line per keystroke
                 // would bury the one failure worth reading. `MXB_LOG=debug` turns it on.
@@ -594,12 +653,13 @@ pub async fn detail(slug: &str) -> anyhow::Result<ModDetail> {
     // swallowed: a 403 is `Ok(resp)`, so its error body went to the parsers and produced
     // zero downloads — the page then said "No download link was found on this page"
     // rather than "we couldn't read the page". Surface it instead.
-    let resp = get_with_retry(&link, &[]).await?;
+    let resp = get_page(&link).await?;
     if !resp.is_success() {
         return Err(refusal("the mod page", &resp));
     }
     let html = resp.body;
     let (downloads, version) = (parse_downloads(&html), parse_version(&html));
+    let author = parse_author(&html);
     // Only call it a challenge when the page also yielded nothing, so a marker that turns
     // up in a page that actually parsed can never turn a working mod into an error.
     if downloads.is_empty() {
@@ -621,6 +681,8 @@ pub async fn detail(slug: &str) -> anyhow::Result<ModDetail> {
         description_html,
         images,
         version,
+        author: author.as_ref().map(|(name, _)| name.clone()),
+        author_url: author.and_then(|(_, url)| url),
         downloads,
         categories: term_names(&post),
     })
@@ -937,6 +999,33 @@ fn parse_version(html: &str) -> Option<String> {
     (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
+/// The byline the theme prints above the post title, and the profile page it links to.
+///
+/// mxb-mods and gpb-mods run the same theme: `<p class="post-date">posted by
+/// <a href="…/author/<slug>/"><b id="authorName">Name</b></a>`. Scoped to the post header
+/// because every comment below the page names an author too, and the first `/author/` link
+/// in the document is only the byline by luck of layout.
+fn parse_author(html: &str) -> Option<(String, Option<String>)> {
+    let doc = Html::parse_document(html);
+
+    if let Ok(sel) = Selector::parse(r#".post-header a[href*="/author/"]"#) {
+        if let Some(el) = doc.select(&sel).next() {
+            let name = el.text().collect::<String>();
+            let name = name.trim();
+            if !name.is_empty() {
+                return Some((name.to_string(), el.value().attr("href").map(str::to_string)));
+            }
+        }
+    }
+
+    // The name without its link — the theme's own id for it, which still stands when the
+    // profile isn't linkable.
+    let sel = Selector::parse("#authorName").ok()?;
+    let name = doc.select(&sel).next()?.text().collect::<String>();
+    let name = name.trim();
+    (!name.is_empty()).then(|| (name.to_string(), None))
+}
+
 fn host_from_url(url: &str) -> String {
     reqwest::Url::parse(url)
         .ok()
@@ -983,6 +1072,23 @@ fn dedup(v: &mut Vec<String>) {
 mod tests {
     use super::*;
 
+    /// The rendered pages are guarded far more tightly than the JSON API, and asking for one
+    /// with the client's JSON-fetch defaults describes a request no browser makes: a script
+    /// wanting an HTML document. Every default this overrides is one that said so.
+    #[test]
+    fn a_page_is_asked_for_the_way_a_browser_navigates() {
+        let h = page_headers();
+        assert_eq!(h.get("sec-fetch-dest").unwrap(), "document");
+        assert_eq!(h.get("sec-fetch-mode").unwrap(), "navigate");
+        assert!(h.get("accept").unwrap().to_str().unwrap().starts_with("text/html"));
+        // A continued string literal is easy to leave a newline in, and a header value with
+        // one in it is rejected outright — which would fail only on the blocked user's machine.
+        for (_, v) in h.iter() {
+            let v = v.to_str().unwrap();
+            assert!(!v.contains('\n') && !v.contains("  "), "{v:?}");
+        }
+    }
+
     #[test]
     fn reads_every_embedded_term_name() {
         // Shape of `_embed=wp:term` on a real livery post: one group per taxonomy, the
@@ -1009,6 +1115,56 @@ mod tests {
 
         // A post fetched without `_embed`, or one with no terms, must not blow up.
         assert!(term_names(&serde_json::json!({})).is_empty());
+    }
+
+    #[test]
+    fn reads_the_byline_from_the_post_header() {
+        // mxb-mods: byline and date in one paragraph.
+        let mxb = r#"
+            <div class="post-header">
+              <p class="post-date">posted by
+                <a href="https://mxb-mods.com/author/kenziesaunders/"><b id="authorName">Macks Tracks</b></a>
+                on Aug. 29, 2026</p>
+              <h1 class="post-title">Highland-Mx</h1>
+            </div>"#;
+        assert_eq!(
+            parse_author(mxb),
+            Some((
+                "Macks Tracks".to_string(),
+                Some("https://mxb-mods.com/author/kenziesaunders/".to_string())
+            ))
+        );
+
+        // gpb-mods: same theme, date split into its own paragraph.
+        let gpb = r#"
+            <div class="post-header"><p class="post-date">Aug. 21, 2026</p>
+              <p class="post-date">posted by
+                <a href="https://gpb-mods.com/author/kalat/"><b id="authorName">Kalat le Nul</b></a></p>
+            </div>"#;
+        assert_eq!(
+            parse_author(gpb).unwrap().0,
+            "Kalat le Nul",
+            "the same parse has to serve both catalogs"
+        );
+    }
+
+    #[test]
+    fn a_commenter_is_never_mistaken_for_the_byline() {
+        // Discussion sits outside `.post-header` and names an author on every comment. A
+        // document-wide search for the first `/author/` link would credit the mod to
+        // whoever happened to be rendered first.
+        let html = r#"
+            <div class="wpd-comment">
+              <a href="https://mxb-mods.com/author/somecommenter/">SomeCommenter</a>
+            </div>
+            <div class="post-header">
+              <p class="post-date">posted by
+                <a href="https://mxb-mods.com/author/dr-phdeez/"><b id="authorName">Dr.PhDeez</b></a></p>
+            </div>"#;
+        assert_eq!(parse_author(html).unwrap().0, "Dr.PhDeez");
+
+        // No byline at all — a page must still parse rather than inventing one.
+        assert_eq!(parse_author("<div class=\"post-header\"></div>"), None);
     }
 
     #[test]
@@ -1417,8 +1573,14 @@ mod client_tests {
         assert!(!mods.is_empty(), "the tracks category should not be empty");
 
         let d = detail(&mods[0].slug).await.expect("detail works");
-        eprintln!("detail '{}': {} downloads, version {:?}", d.title, d.downloads.len(), d.version);
+        eprintln!(
+            "detail '{}': {} downloads, version {:?}, by {:?} ({:?})",
+            d.title, d.downloads.len(), d.version, d.author, d.author_url
+        );
         assert!(!d.title.is_empty());
+        // The byline is scraped off the rendered page, not the REST API — the site answers
+        // `_embed=author` with an empty user, so nothing else would notice a theme change.
+        assert!(d.author.is_some(), "every post on the catalog carries a byline");
     }
 
     /// The ReShade Presets category the Settings card sends people to is real, populated,

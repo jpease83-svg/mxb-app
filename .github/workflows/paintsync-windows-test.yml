@@ -1,0 +1,76 @@
+name: Paint Sync Windows Tester
+
+on:
+  push:
+    branches:
+      - feature/paintsync-session-bridge
+      - integrate/frost-0.11.1
+      - integrate/frost-0.12.0
+    paths:
+      - "src/**"
+      - "src-tauri/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/test-tauri.conf.json"
+      - ".github/workflows/paintsync-windows-test.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: paintsync-windows-tester
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Windows paint-sync test installer
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout paint-sync branch
+        uses: actions/checkout@v4
+
+      - name: Route FrostMod updates to the paint-sync test release
+        shell: pwsh
+        run: |
+          $path = 'src-tauri/src/frostmod_manage.rs'
+          $text = Get-Content $path -Raw
+          $from = 'const REPO: &str = "Frostn1/frostmod";'
+          $to = 'const REPO: &str = "jpease83-svg/frostmod";'
+          if (-not $text.Contains($from)) {
+            Write-Error 'Expected FrostMod upstream channel constant was not found; refusing to build a tester with an unknown update source.'
+            exit 1
+          }
+          $text = $text.Replace($from, $to)
+          Set-Content -Path $path -Value $text -NoNewline -Encoding utf8
+          Select-String -Path $path -Pattern 'const REPO'
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build isolated unsigned tester
+        run: npm run tauri -- build --ci --bundles nsis --no-sign --config .github/test-tauri.conf.json
+
+      - name: Upload Windows tester
+        uses: actions/upload-artifact@v4
+        with:
+          name: mxb-app-paintsync-windows-test
+          path: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/MXB App.exe
+          if-no-files-found: error

@@ -14,7 +14,8 @@ So the loop has to be closed outside the game: each player's app reports its loa
 and every other app on the server reads it back and fetches what it's missing. Two
 consequences fall out of that, and they're baked into the schema:
 
-- **Every rider needs the app**, not just the server owner.
+- **Every viewer needs the app.** A paint owner only has to publish once; they do not need
+  the app running during the race. A rider who has never published has nothing to fetch.
 - **Paints are content-addressed by SHA-256 and pinned to a canonical filename.** Matching
   is by name, so the sync is worthless if two riders hold the same bytes under different
   names — or different bytes under the same one.
@@ -25,13 +26,14 @@ consequences fall out of that, and they're baked into the schema:
 |---|---|---|---|
 | GET | `/health` | — | Liveness |
 | GET | `/v1/agent.exe` | — | The agent binary. Unauthenticated by necessity: a booting instance fetches it before it holds any credential. |
-| POST | `/v1/enroll` | invite code | Trade an invite for an account and a bearer token |
+| POST | `/v1/enroll` | — | Create a public-beta account and return a bearer token. Private deployments can still require an invite. |
 | GET | `/v1/servers` | — | Server registry. Public: it is the app's join picker, and the people who most need it are the ones with no account yet. `agent_url` is not returned. |
 | POST | `/v1/servers/:id/hello` | agent token | A provisioned box announcing that it is up. Its address is taken from `cf-connecting-ip`, never from the body, so a box cannot register somebody else's. |
 | GET | `/v1/me` | bearer | Account, and a per-bike summary of what is stored for it |
 | PUT | `/v1/me/guid` | bearer | Claim a GUID. First-come. |
 | PUT | `/v1/loadout` | bearer | Replace **one bike's** loadout. Kept for clients older than per-bike storage. |
 | PUT | `/v1/loadouts` | bearer | Replace the whole look, every bike at once. Returns `missing` — the blobs still to upload. |
+| GET | `/v1/catalog` | bearer | Capped list of recently published riders for solo-viewer sync, independent of live presence. |
 | GET | `/v1/roster?server=<id>` | bearer | Riders and their paints, for the sync. De-duplicated by destination. |
 | POST | `/v1/servers` | bearer | Publish a server you run. Five per account, one per address. |
 | DELETE | `/v1/servers/:id` | bearer + owner | Remove it, terminating the instance if we launched it |
@@ -41,9 +43,11 @@ consequences fall out of that, and they're baked into the schema:
 | PUT/GET | `/v1/paints/:sha256` | bearer | Content-addressed paint blobs |
 | POST | `/v1/bmac/webhook` | HMAC signature | Buy Me a Coffee announcing a supporter. Posted on to Discord. |
 
-Enrollment by invite code stands in for Steam sign-in until there's an API key. `accounts`
-already carries a nullable `steam_id`, so adding Steam is a backfill rather than a rewrite
-of every account's identity.
+Public beta enrollment is controlled by `MXB_PUBLIC_ENROLLMENT`; setting it to `0` restores
+one-use invite codes. `MXB_PUBLIC_ACCOUNT_LIMIT` is a cost backstop, not identity or abuse
+protection. Steam sign-in remains the production destination. `accounts` already carries a
+nullable `steam_id`, so adding it is a backfill rather than a rewrite of every account's
+identity.
 
 ### Why loadouts are per bike
 
@@ -98,8 +102,9 @@ exactly like a failure, so without that table one coffee arrives five times.
 - Tokens are shown **once** at enrollment and stored only as a SHA-256 digest. Lookup is by
   digest, so the comparison happens inside the index — there's no string compare of a secret
   to leak timing, and a database dump yields nothing presentable.
-- An unknown invite code and an already-claimed one return the **same** 403. Distinguishing
-  them turns the endpoint into an oracle for enumerating valid codes.
+- On private deployments, an unknown invite code and an already-claimed one return the
+  **same** 403. Distinguishing them turns the endpoint into an oracle for enumerating valid
+  codes.
 - Paint filenames are validated hard: this is the one input that becomes a *path on another
   player's disk*, so separators, `..`, control characters and Windows-illegal characters are
   rejected outright and the `.pnt` extension is required.
