@@ -65,45 +65,40 @@ jobs:
                   raise SystemExit(f"main.rs patch guard failed for {old!r}: expected {expected}, found {count}")
               main = main.replace(old, new, expected)
 
-          old = '''    if keys.is_empty() {
-              return Err("No servers to sync with yet.".into());
-          }
+          fn_start = main.index("async fn pull_rosters(")
+          fn_end = main.index("\n/// Install every other rider's paints", fn_start)
+          pull_fn = main[fn_start:fn_end]
 
-          // Say where we are before asking who else is here: the roster is scoped by presence, so
-          // reporting first is what puts this rider into everyone else's grid too.
-          for key in &keys {
-              if let Err(e) = paintsync::report_presence(&cfg.cp_token, key).await {
-                  log::debug!("[sync] couldn't report presence on {key}: {e:#}");
+          empty_guard = '    if keys.is_empty() {'
+          if pull_fn.count(empty_guard) != 1:
+              raise SystemExit(f"pull_rosters empty-key guard mismatch: {pull_fn.count(empty_guard)}")
+          catalog = '''    // The recent-rider catalog is the pre-session cache. Helmet and goggle paints are
+              // especially sensitive to timing: MX Bikes binds rider cosmetics when the remote rider is
+              // created, and a later content rescan does not reliably rebind an already-spawned helmet.
+              // Fetching previously published looks before launch means those files are already registered
+              // when the rider appears. Live 45-second pulls stay roster-only so the catalog is not fetched
+              // over and over for the length of a race.
+              if include_catalog && !keys.iter().any(|key| key == paintsync::CATALOG_SCOPE) {
+                  keys.push(paintsync::CATALOG_SCOPE.to_string());
               }
-          }
           '''
-          new = '''    // The recent-rider catalog is the pre-session cache. Helmet and goggle paints are
-          // especially sensitive to timing: MX Bikes binds rider cosmetics when the remote rider is
-          // created, and a later content rescan does not reliably rebind an already-spawned helmet.
-          // Fetching previously published looks before launch means those files are already registered
-          // when the rider appears. Live 45-second pulls stay roster-only so the catalog is not fetched
-          // over and over for the length of a race.
-          if include_catalog && !keys.iter().any(|key| key == paintsync::CATALOG_SCOPE) {
-              keys.push(paintsync::CATALOG_SCOPE.to_string());
-          }
-          if keys.is_empty() {
-              return Err("No servers to sync with yet.".into());
-          }
+          pull_fn = pull_fn.replace(empty_guard, catalog + empty_guard, 1)
 
-          // Say where we are before asking who else is here. `catalog` is a read scope, not a
-          // server, so never report presence into it.
-          for key in &keys {
+          presence = '''    for key in &keys {
+              if let Err(e) = paintsync::report_presence(&cfg.cp_token, key).await {
+          '''
+          if pull_fn.count(presence) != 1:
+              raise SystemExit(f"pull_rosters presence guard mismatch: {pull_fn.count(presence)}")
+          presence_new = '''    for key in &keys {
+              // `catalog` is a read scope, not a server. Reporting presence there would create a
+              // fake roster and defeat the separation between prefetch and live-session presence.
               if key == paintsync::CATALOG_SCOPE {
                   continue;
               }
               if let Err(e) = paintsync::report_presence(&cfg.cp_token, key).await {
-                  log::debug!("[sync] couldn't report presence on {key}: {e:#}");
-              }
-          }
           '''
-          if main.count(old) != 1:
-              raise SystemExit(f"main.rs catalog block guard failed: found {main.count(old)}")
-          main = main.replace(old, new, 1)
+          pull_fn = pull_fn.replace(presence, presence_new, 1)
+          main = main[:fn_start] + pull_fn + main[fn_end:]
           main_path.write_text(main, encoding="utf-8")
 
           bundle_path = Path("src-tauri/src/bundle.rs")
