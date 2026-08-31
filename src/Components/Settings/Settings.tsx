@@ -102,10 +102,10 @@ import {
 import { Switch } from "@/Components/ui/switch";
 import { cn } from "@/lib/utils";
 
-const REPO_URL = "https://github.com/Frostn1/mxb-app";
+const REPO_URL = "https://github.com/jpease83-svg/mxb-app";
 // Permanent invite (no expiry, no use cap) — a link that dies leaves a dead button
 // in a shipped build, and the app can't be told about a new one without an update.
-const DISCORD_URL = "https://discord.gg/3994Rr3ywb";
+const DISCORD_URL = "https://github.com/jpease83-svg/mxb-app/pull/1";
 
 export type SectionId =
   | "game"
@@ -2012,7 +2012,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                 GitHub <ExternalLink className="size-3" />
               </button>
               <button
-                onClick={() => openUrl(`${REPO_URL}/blob/main/CHANGELOG.md`)}
+                onClick={() => openUrl(`${REPO_URL}/blob/release/paintsync-public-beta-0.12.0/CHANGELOG.md`)}
                 className="cursor-default hover:text-foreground"
               >
                 Changelog
@@ -2038,7 +2038,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                 <Compass className="size-3.5" /> Replay tour
               </Button>
               <Button variant="outline" size="sm" onClick={() => openUrl(DISCORD_URL)}>
-                <MessagesSquare className="size-3.5" /> Join the Discord
+                <MessagesSquare className="size-3.5" /> Beta feedback
               </Button>
             </div>
             <div className="flex flex-col gap-1 pt-1 text-[11.5px] text-faint">
