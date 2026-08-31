@@ -1,0 +1,25 @@
+{
+  "productName": "MXB App Paint Sync Beta",
+  "version": "0.12.0-beta.1",
+  "identifier": "com.peasey.mxbikes.paintsync-test",
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["mxb-paintsync-beta"]
+      }
+    },
+    "updater": {
+      "endpoints": [
+        "https://github.com/jpease83-svg/mxb-app/releases/latest/download/latest.json"
+      ]
+    }
+  },
+  "bundle": {
+    "createUpdaterArtifacts": false,
+    "publisher": "Peasey",
+    "copyright": "Copyright © 2026",
+    "homepage": "https://github.com/jpease83-svg/mxb-app",
+    "shortDescription": "Public beta of Paint Sync for MX Bikes",
+    "longDescription": "An isolated public beta of MXB App that adds community paint synchronization for MX Bikes. It installs beside Frost's normal MXB App identity and uses the dedicated Paint Sync FrostMod test channel."
+  }
+}
