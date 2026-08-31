@@ -1,0 +1,200 @@
+name: Apply Helmet and Goggle Paint Sync Fix
+
+on:
+  push:
+    branches:
+      - fix/paintsync-helmet-goggles-0.12.0
+    paths:
+      - ".github/workflows/paintsync-helmet-goggles-fix-v2.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: paintsync-helmet-goggles-fix-v2
+  cancel-in-progress: true
+
+jobs:
+  patch-test-build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout fix branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/paintsync-helmet-goggles-0.12.0
+
+      - name: Apply guarded source patch
+        shell: python
+        run: |
+          from pathlib import Path
+
+          main_path = Path("src-tauri/src/main.rs")
+          main = main_path.read_text(encoding="utf-8")
+
+          swaps = {
+              "match pull_rosters(&app, address).await {": "match pull_rosters(&app, address, true).await {",
+              "match pull_rosters(&app, address.clone()).await {": "match pull_rosters(&app, address.clone(), false).await {",
+              "match pull_rosters(&app, None).await {": "match pull_rosters(&app, None, true).await {",
+              "async fn pull_rosters(\n    app: &tauri::AppHandle,\n    address: Option<String>,\n) -> Result<paintsync::PullOutcome, String> {": "async fn pull_rosters(\n    app: &tauri::AppHandle,\n    address: Option<String>,\n    include_catalog: bool,\n) -> Result<paintsync::PullOutcome, String> {",
+              "    let keys: Vec<String> = match &address {": "    let mut keys: Vec<String> = match &address {",
+          }
+          for old, new in swaps.items():
+              if main.count(old) != 1:
+                  raise SystemExit(f"main.rs guard mismatch for {old!r}: {main.count(old)}")
+              main = main.replace(old, new, 1)
+
+          start = main.index("async fn pull_rosters(")
+          end = main.index("\n/// Install every other rider's paints", start)
+          fn = main[start:end]
+
+          empty = "    if keys.is_empty() {"
+          if fn.count(empty) != 1:
+              raise SystemExit(f"empty-key guard mismatch: {fn.count(empty)}")
+          catalog = (
+              "    // Prefetch recent published looks before a session. MX Bikes binds rider cosmetics\n"
+              "    // when a remote rider is created; a later content rescan does not reliably rebind an\n"
+              "    // already-spawned helmet or goggle material. Live periodic pulls remain roster-only.\n"
+              "    if include_catalog && !keys.iter().any(|key| key == paintsync::CATALOG_SCOPE) {\n"
+              "        keys.push(paintsync::CATALOG_SCOPE.to_string());\n"
+              "    }\n"
+          )
+          fn = fn.replace(empty, catalog + empty, 1)
+
+          loop = "    for key in &keys {"
+          if fn.count(loop) != 1:
+              raise SystemExit(f"presence-loop guard mismatch: {fn.count(loop)}")
+          loop_new = (
+              "    for key in &keys {\n"
+              "        // The catalog is a read scope, not a server presence bucket.\n"
+              "        if key == paintsync::CATALOG_SCOPE {\n"
+              "            continue;\n"
+              "        }"
+          )
+          fn = fn.replace(loop, loop_new, 1)
+          main = main[:start] + fn + main[end:]
+          main_path.write_text(main, encoding="utf-8")
+
+          bundle_path = Path("src-tauri/src/bundle.rs")
+          bundle = bundle_path.read_text(encoding="utf-8")
+          block_start_text = "        if let Some(parent) = spec.parent.as_ref().map(|p| p.trim()).filter(|p| !p.is_empty()) {"
+          block_end_text = "\n\n        if matches.is_empty() {"
+          block_start = bundle.index(block_start_text)
+          block_end = bundle.index(block_end_text, block_start)
+          original = bundle[block_start:block_end]
+          if original.count("matches.retain") != 1 or original.count("strict_parent") != 1:
+              raise SystemExit("bundle.rs parent-resolution block no longer has the expected shape")
+          replacement = (
+              "        if spec.slot == \"goggles_paint\" {\n"
+              "            // Goggles may be installed under the selected helmet or under the rider profile.\n"
+              "            // Prefer the helmet when both contain the same name, then the rider profile.\n"
+              "            let preferred = [loadout.helmet.trim(), loadout.rider.trim()];\n"
+              "            if let Some(parent) = preferred.into_iter().find(|parent| {\n"
+              "                !parent.is_empty()\n"
+              "                    && matches.iter().any(|e| {\n"
+              "                        e.parent\n"
+              "                            .as_deref()\n"
+              "                            .map(|p| p.eq_ignore_ascii_case(parent))\n"
+              "                            .unwrap_or(false)\n"
+              "                    })\n"
+              "            }) {\n"
+              "                matches.retain(|e| {\n"
+              "                    e.parent\n"
+              "                        .as_deref()\n"
+              "                        .map(|p| p.eq_ignore_ascii_case(parent))\n"
+              "                        .unwrap_or(false)\n"
+              "                });\n"
+              "            }\n"
+              "        } else " + original.lstrip()
+          )
+          bundle = bundle[:block_start] + replacement + bundle[block_end:]
+
+          marker = "    #[test]\n    fn plan_skips_builtins() {"
+          if bundle.count(marker) != 1:
+              raise SystemExit(f"bundle.rs test marker mismatch: {bundle.count(marker)}")
+          test = (
+              "    #[test]\n"
+              "    fn goggle_resolution_prefers_selected_helmet_then_rider_profile() {\n"
+              "        let root = tmp(\"profile-goggles\");\n"
+              "        touch(&root.join(\"mods/rider/helmets/AGV/model.edf\"));\n"
+              "        touch(&root.join(\"mods/rider/helmets/AGV/goggles/Smoke.pnt\"));\n"
+              "        touch(&root.join(\"mods/rider/riders/Peasey/goggles/Smoke.pnt\"));\n\n"
+              "        let cfg = AppConfig { mods_path: root.to_string_lossy().into_owned(), ..Default::default() };\n"
+              "        let mut loadout = Loadout::default();\n"
+              "        loadout.helmet = \"AGV\".into();\n"
+              "        loadout.rider = \"Peasey\".into();\n"
+              "        loadout.goggles_paint = \"Smoke\".into();\n\n"
+              "        let plans = plan_many_for_bikes(&cfg, &[(\"YZ250\".to_string(), loadout.clone())]);\n"
+              "        let goggle = plans[0].assets.iter().find(|a| a.slot == \"goggles_paint\").map(|a| a.rel_dest.as_str());\n"
+              "        assert_eq!(goggle, Some(\"rider/helmets/AGV/goggles/Smoke.pnt\"));\n\n"
+              "        std::fs::remove_file(root.join(\"mods/rider/helmets/AGV/goggles/Smoke.pnt\")).unwrap();\n"
+              "        let plans = plan_many_for_bikes(&cfg, &[(\"YZ250\".to_string(), loadout)]);\n"
+              "        let goggle = plans[0].assets.iter().find(|a| a.slot == \"goggles_paint\").map(|a| a.rel_dest.as_str());\n"
+              "        assert_eq!(goggle, Some(\"rider/riders/Peasey/goggles/Smoke.pnt\"));\n"
+              "        let _ = std::fs::remove_dir_all(&root);\n"
+              "    }\n\n"
+          )
+          bundle = bundle.replace(marker, test + marker, 1)
+          bundle_path.write_text(bundle, encoding="utf-8")
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Frontend typecheck
+        run: npm run typecheck
+
+      - name: Frontend lint
+        run: npm run lint
+
+      - name: Frontend build
+        run: npm run build
+
+      - name: Rust tests
+        working-directory: src-tauri
+        run: cargo test --locked
+
+      - name: Commit tested source fix
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src-tauri/src/main.rs src-tauri/src/bundle.rs
+          git diff --cached --check
+          git commit -m "fix(sync): prefetch helmet and goggle paints before session"
+          git push origin HEAD:fix/paintsync-helmet-goggles-0.12.0
+
+      - name: Route FrostMod to Paint Sync test channel
+        shell: pwsh
+        run: |
+          $path = 'src-tauri/src/frostmod_manage.rs'
+          $text = Get-Content $path -Raw
+          $from = 'const REPO: &str = "Frostn1/frostmod";'
+          $to = 'const REPO: &str = "jpease83-svg/frostmod";'
+          if (-not $text.Contains($from)) { throw 'Expected FrostMod repo constant was not found.' }
+          Set-Content -Path $path -Value $text.Replace($from, $to) -NoNewline -Encoding utf8
+
+      - name: Build isolated unsigned tester
+        run: npm run tauri -- build --ci --bundles nsis --no-sign --config .github/test-tauri.conf.json
+
+      - name: Upload fixed tester
+        uses: actions/upload-artifact@v4
+        with:
+          name: mxb-app-paintsync-helmet-goggle-fix
+          path: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/MXB App.exe
+          if-no-files-found: error
