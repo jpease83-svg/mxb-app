@@ -1,0 +1,54 @@
+name: Correct Paint Sync Beta Feedback Target
+
+on:
+  push:
+    branches:
+      - release/paintsync-public-beta-0.12.0
+    paths:
+      - ".github/workflows/beta-feedback-target-fix.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: release/paintsync-public-beta-0.12.0
+
+      - name: Point feedback at the open Paint Sync PR and supersede old release runs
+        shell: bash
+        run: |
+          set -euo pipefail
+          path=.github/workflows/paintsync-public-beta.yml
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('.github/workflows/paintsync-public-beta.yml')
+          text = p.read_text(encoding='utf-8')
+          old_link = 'https://github.com/jpease83-svg/mxb-app/issues'
+          new_link = 'https://github.com/jpease83-svg/mxb-app/pull/1'
+          if text.count(old_link) != 2:
+              raise SystemExit(f'expected 2 dead issue links, found {text.count(old_link)}')
+          text = text.replace(old_link, new_link)
+          old = '  cancel-in-progress: false'
+          new = '  cancel-in-progress: true'
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one concurrency guard, found {text.count(old)}')
+          text = text.replace(old, new, 1)
+          p.write_text(text, encoding='utf-8')
+          PY
+          git diff --check
+          git diff -- "$path"
+
+      - name: Commit correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/workflows/paintsync-public-beta.yml
+          git commit -m 'fix(beta): use live Paint Sync PR for public feedback'
+          git push origin HEAD:release/paintsync-public-beta-0.12.0
