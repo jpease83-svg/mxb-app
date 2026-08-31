@@ -1,0 +1,74 @@
+name: Patch Public Beta Support Routing
+
+on:
+  push:
+    branches:
+      - release/paintsync-public-beta-0.12.0
+    paths:
+      - ".github/workflows/beta-ui-routing-fix.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: release/paintsync-public-beta-0.12.0
+
+      - name: Route beta About/support buttons to Paint Sync project
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path("src/Components/Settings/Settings.tsx")
+          text = p.read_text(encoding="utf-8")
+          swaps = [
+              (
+                  'const REPO_URL = "https://github.com/Frostn1/mxb-app";',
+                  'const REPO_URL = "https://github.com/jpease83-svg/mxb-app";',
+              ),
+              (
+                  'const DISCORD_URL = "https://discord.gg/3994Rr3ywb";',
+                  'const DISCORD_URL = "https://github.com/jpease83-svg/mxb-app/pull/1";',
+              ),
+              (
+                  'onClick={() => openUrl(`${REPO_URL}/blob/main/CHANGELOG.md`)}',
+                  'onClick={() => openUrl(`${REPO_URL}/blob/release/paintsync-public-beta-0.12.0/CHANGELOG.md`)}',
+              ),
+              (
+                  '<MessagesSquare className="size-3.5" /> Join the Discord',
+                  '<MessagesSquare className="size-3.5" /> Beta feedback',
+              ),
+          ]
+          for old, new in swaps:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"guard mismatch for {old!r}: expected 1, found {count}")
+              text = text.replace(old, new, 1)
+          p.write_text(text, encoding="utf-8")
+
+      - name: Verify only intended UI file changed
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          test "$(git diff --name-only)" = "src/Components/Settings/Settings.tsx"
+          grep -F 'https://github.com/jpease83-svg/mxb-app' src/Components/Settings/Settings.tsx
+          grep -F 'Beta feedback' src/Components/Settings/Settings.tsx
+          if grep -Fq 'Join the Discord' src/Components/Settings/Settings.tsx; then
+            echo 'Old Discord label still present.' >&2
+            exit 1
+          fi
+
+      - name: Commit beta-only routing source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/Components/Settings/Settings.tsx
+          git commit -m 'fix(beta): route support links to Paint Sync project'
+          git push origin HEAD:release/paintsync-public-beta-0.12.0
