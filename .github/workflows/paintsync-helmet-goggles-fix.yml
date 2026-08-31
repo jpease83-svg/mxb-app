@@ -1,0 +1,264 @@
+name: Fix Helmet and Goggle Paint Sync
+
+on:
+  push:
+    branches:
+      - fix/paintsync-helmet-goggles-0.12.0
+    paths:
+      - ".github/workflows/paintsync-helmet-goggles-fix.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: paintsync-helmet-goggles-fix
+  cancel-in-progress: true
+
+jobs:
+  patch-test-build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout fix branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/paintsync-helmet-goggles-0.12.0
+
+      - name: Patch catalog prefetch and goggle path resolution
+        shell: python
+        run: |
+          from pathlib import Path
+
+          main_path = Path("src-tauri/src/main.rs")
+          main = main_path.read_text(encoding="utf-8")
+
+          replacements = [
+              (
+                  "match pull_rosters(&app, address).await {",
+                  "match pull_rosters(&app, address, true).await {",
+                  1,
+              ),
+              (
+                  "match pull_rosters(&app, address.clone()).await {",
+                  "match pull_rosters(&app, address.clone(), false).await {",
+                  1,
+              ),
+              (
+                  "match pull_rosters(&app, None).await {",
+                  "match pull_rosters(&app, None, true).await {",
+                  1,
+              ),
+              (
+                  "async fn pull_rosters(\n    app: &tauri::AppHandle,\n    address: Option<String>,\n) -> Result<paintsync::PullOutcome, String> {",
+                  "async fn pull_rosters(\n    app: &tauri::AppHandle,\n    address: Option<String>,\n    include_catalog: bool,\n) -> Result<paintsync::PullOutcome, String> {",
+                  1,
+              ),
+              (
+                  "    let keys: Vec<String> = match &address {",
+                  "    let mut keys: Vec<String> = match &address {",
+                  1,
+              ),
+          ]
+          for old, new, expected in replacements:
+              count = main.count(old)
+              if count != expected:
+                  raise SystemExit(f"main.rs patch guard failed for {old!r}: expected {expected}, found {count}")
+              main = main.replace(old, new, expected)
+
+          old = '''    if keys.is_empty() {
+              return Err("No servers to sync with yet.".into());
+          }
+
+          // Say where we are before asking who else is here: the roster is scoped by presence, so
+          // reporting first is what puts this rider into everyone else's grid too.
+          for key in &keys {
+              if let Err(e) = paintsync::report_presence(&cfg.cp_token, key).await {
+                  log::debug!("[sync] couldn't report presence on {key}: {e:#}");
+              }
+          }
+          '''
+          new = '''    // The recent-rider catalog is the pre-session cache. Helmet and goggle paints are
+          // especially sensitive to timing: MX Bikes binds rider cosmetics when the remote rider is
+          // created, and a later content rescan does not reliably rebind an already-spawned helmet.
+          // Fetching previously published looks before launch means those files are already registered
+          // when the rider appears. Live 45-second pulls stay roster-only so the catalog is not fetched
+          // over and over for the length of a race.
+          if include_catalog && !keys.iter().any(|key| key == paintsync::CATALOG_SCOPE) {
+              keys.push(paintsync::CATALOG_SCOPE.to_string());
+          }
+          if keys.is_empty() {
+              return Err("No servers to sync with yet.".into());
+          }
+
+          // Say where we are before asking who else is here. `catalog` is a read scope, not a
+          // server, so never report presence into it.
+          for key in &keys {
+              if key == paintsync::CATALOG_SCOPE {
+                  continue;
+              }
+              if let Err(e) = paintsync::report_presence(&cfg.cp_token, key).await {
+                  log::debug!("[sync] couldn't report presence on {key}: {e:#}");
+              }
+          }
+          '''
+          if main.count(old) != 1:
+              raise SystemExit(f"main.rs catalog block guard failed: found {main.count(old)}")
+          main = main.replace(old, new, 1)
+          main_path.write_text(main, encoding="utf-8")
+
+          bundle_path = Path("src-tauri/src/bundle.rs")
+          bundle = bundle_path.read_text(encoding="utf-8")
+          old = '''        if let Some(parent) = spec.parent.as_ref().map(|p| p.trim()).filter(|p| !p.is_empty()) {
+              if spec.strict_parent || matches.iter().any(|e| {
+                  e.parent.as_deref().map(|p| p.eq_ignore_ascii_case(parent)).unwrap_or(false)
+              }) {
+                  matches.retain(|e| {
+                      e.parent.as_deref().map(|p| p.eq_ignore_ascii_case(parent)).unwrap_or(false)
+                  });
+              }
+          }
+          '''
+          new = '''        if spec.slot == "goggles_paint" {
+              // MX Bikes accepts goggle paints in two rider layouts: helmet-specific goggles
+              // and profile-specific goggles. Prefer the selected helmet when both contain the
+              // same paint name, then the selected rider profile. Falling back to an arbitrary
+              // first filename match can publish another rider's same-named goggle paint.
+              let preferred = [loadout.helmet.trim(), loadout.rider.trim()];
+              if let Some(parent) = preferred.into_iter().find(|parent| {
+                  !parent.is_empty()
+                      && matches.iter().any(|e| {
+                          e.parent
+                              .as_deref()
+                              .map(|p| p.eq_ignore_ascii_case(parent))
+                              .unwrap_or(false)
+                      })
+              }) {
+                  matches.retain(|e| {
+                      e.parent
+                          .as_deref()
+                          .map(|p| p.eq_ignore_ascii_case(parent))
+                          .unwrap_or(false)
+                  });
+              }
+          } else if let Some(parent) = spec.parent.as_ref().map(|p| p.trim()).filter(|p| !p.is_empty()) {
+              if spec.strict_parent || matches.iter().any(|e| {
+                  e.parent.as_deref().map(|p| p.eq_ignore_ascii_case(parent)).unwrap_or(false)
+              }) {
+                  matches.retain(|e| {
+                      e.parent.as_deref().map(|p| p.eq_ignore_ascii_case(parent)).unwrap_or(false)
+                  });
+              }
+          }
+          '''
+          if bundle.count(old) != 1:
+              raise SystemExit(f"bundle.rs resolver guard failed: found {bundle.count(old)}")
+          bundle = bundle.replace(old, new, 1)
+
+          marker = '''    #[test]
+          fn plan_skips_builtins() {
+          '''
+          test = '''    #[test]
+          fn goggle_resolution_prefers_selected_helmet_then_rider_profile() {
+              let root = tmp("profile-goggles");
+              touch(&root.join("mods/rider/helmets/AGV/model.edf"));
+              touch(&root.join("mods/rider/helmets/AGV/goggles/Smoke.pnt"));
+              touch(&root.join("mods/rider/riders/Peasey/goggles/Smoke.pnt"));
+
+              let cfg = AppConfig { mods_path: root.to_string_lossy().into_owned(), ..Default::default() };
+              let mut loadout = Loadout::default();
+              loadout.helmet = "AGV".into();
+              loadout.rider = "Peasey".into();
+              loadout.goggles_paint = "Smoke".into();
+
+              let plans = plan_many_for_bikes(&cfg, &[("YZ250".to_string(), loadout.clone())]);
+              let goggle = plans[0]
+                  .assets
+                  .iter()
+                  .find(|asset| asset.slot == "goggles_paint")
+                  .map(|asset| asset.rel_dest.as_str());
+              assert_eq!(goggle, Some("rider/helmets/AGV/goggles/Smoke.pnt"));
+
+              std::fs::remove_file(root.join("mods/rider/helmets/AGV/goggles/Smoke.pnt")).unwrap();
+              let plans = plan_many_for_bikes(&cfg, &[("YZ250".to_string(), loadout)]);
+              let goggle = plans[0]
+                  .assets
+                  .iter()
+                  .find(|asset| asset.slot == "goggles_paint")
+                  .map(|asset| asset.rel_dest.as_str());
+              assert_eq!(goggle, Some("rider/riders/Peasey/goggles/Smoke.pnt"));
+              let _ = std::fs::remove_dir_all(&root);
+          }
+
+          #[test]
+          fn plan_skips_builtins() {
+          '''
+          if bundle.count(marker) != 1:
+              raise SystemExit(f"bundle.rs test marker guard failed: found {bundle.count(marker)}")
+          bundle = bundle.replace(marker, test, 1)
+          bundle_path.write_text(bundle, encoding="utf-8")
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Frontend typecheck
+        run: npm run typecheck
+
+      - name: Frontend lint
+        run: npm run lint
+
+      - name: Frontend build
+        run: npm run build
+
+      - name: Rust tests
+        working-directory: src-tauri
+        run: cargo test --locked
+
+      - name: Commit tested source fix
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src-tauri/src/main.rs src-tauri/src/bundle.rs
+          git diff --cached --check
+          git commit -m "fix(sync): prefetch helmet and goggle paints before session"
+          git push origin HEAD:fix/paintsync-helmet-goggles-0.12.0
+
+      - name: Route FrostMod updates to Paint Sync test channel for tester build
+        shell: pwsh
+        run: |
+          $path = 'src-tauri/src/frostmod_manage.rs'
+          $text = Get-Content $path -Raw
+          $from = 'const REPO: &str = "Frostn1/frostmod";'
+          $to = 'const REPO: &str = "jpease83-svg/frostmod";'
+          if (-not $text.Contains($from)) {
+            Write-Error 'Expected FrostMod upstream channel constant was not found.'
+            exit 1
+          }
+          $text = $text.Replace($from, $to)
+          Set-Content -Path $path -Value $text -NoNewline -Encoding utf8
+
+      - name: Build isolated unsigned Windows tester
+        run: npm run tauri -- build --ci --bundles nsis --no-sign --config .github/test-tauri.conf.json
+
+      - name: Upload helmet-goggle fix tester
+        uses: actions/upload-artifact@v4
+        with:
+          name: mxb-app-paintsync-helmet-goggle-fix
+          path: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/MXB App.exe
+          if-no-files-found: error
