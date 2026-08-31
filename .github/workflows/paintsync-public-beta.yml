@@ -13,7 +13,7 @@ permissions:
 
 concurrency:
   group: paintsync-public-beta-0.12.0
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   BETA_VERSION: 0.12.0-beta.1
@@ -237,7 +237,7 @@ jobs:
           - Whether the owner had clicked Publish now at least once
           - A shared/exported log bundle from Settings > Logs when possible
 
-          Bugs: https://github.com/jpease83-svg/mxb-app/issues
+          Beta feedback thread: https://github.com/jpease83-svg/mxb-app/pull/1
           '@ | Set-Content 'public-beta/PUBLIC-BETA-README.txt' -Encoding utf8
 
           $hash = (Get-FileHash "public-beta/$publicName" -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -290,7 +290,7 @@ jobs:
           ### Report useful failures
           Include rider names, server name, bike/model IDs, helmet/rider/goggle model names, which slots worked/failed, whether both PCs had the same custom model, whether the owner published once, and an exported/shared log bundle when possible.
 
-          Bug reports: https://github.com/jpease83-svg/mxb-app/issues
+          Beta feedback thread: https://github.com/jpease83-svg/mxb-app/pull/1
 
           The attached `PUBLIC-BETA-README.txt` contains the same setup/test checklist. `SHA256SUMS.txt` lets testers verify the installer bytes.
           '@ | Set-Content public-beta/RELEASE-NOTES.md -Encoding utf8
