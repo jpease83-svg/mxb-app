@@ -5819,7 +5819,7 @@ fn sync_paints_soon(app: &tauri::AppHandle, address: Option<String>) {
             return;
         }
         emit_sync(&app, SyncEvent::phase("pulling"));
-        match pull_rosters(&app, address).await {
+        match pull_rosters(&app, address, true).await {
             Ok(o) => {
                 log::info!(
                     "[sync] {} riders, {} paints installed, {} already held, {} kept as yours, \
@@ -5910,7 +5910,7 @@ fn live_sync_session(app: &tauri::AppHandle, address: Option<String>) {
             }
             next_periodic_pull = std::time::Instant::now() + LIVE_SYNC_EVERY;
 
-            match pull_rosters(&app, address.clone()).await {
+            match pull_rosters(&app, address.clone(), false).await {
                 // Only say so when something actually arrived: an unchanged grid is the
                 // common case and does not need announcing every 45 seconds.
                 Ok(o) if o.installed > 0 => {
@@ -5937,6 +5937,7 @@ fn live_sync_session(app: &tauri::AppHandle, address: Option<String>) {
 async fn pull_rosters(
     app: &tauri::AppHandle,
     address: Option<String>,
+    include_catalog: bool,
 ) -> Result<paintsync::PullOutcome, String> {
     let cfg = config::load_or_detect(app).unwrap_or_default();
     if cfg.cp_token.trim().is_empty() {
@@ -5971,7 +5972,7 @@ async fn pull_rosters(
         }
     }
 
-    let keys: Vec<String> = match &address {
+    let mut keys: Vec<String> = match &address {
         Some(addr) => vec![paintsync::server_key_for(&registry, addr)],
         None => match session.as_ref() {
             Some(s) => {
@@ -5985,6 +5986,12 @@ async fn pull_rosters(
             None => registry.iter().map(|s| s.id.clone()).collect(),
         },
     };
+    // Prefetch recent published looks before a session. MX Bikes binds rider cosmetics
+    // when a remote rider is created; a later content rescan does not reliably rebind an
+    // already-spawned helmet or goggle material. Live periodic pulls remain roster-only.
+    if include_catalog && !keys.iter().any(|key| key == paintsync::CATALOG_SCOPE) {
+        keys.push(paintsync::CATALOG_SCOPE.to_string());
+    }
     if keys.is_empty() {
         return Err("No servers to sync with yet.".into());
     }
@@ -5992,6 +5999,10 @@ async fn pull_rosters(
     // Say where we are before asking who else is here: the roster is scoped by presence, so
     // reporting first is what puts this rider into everyone else's grid too.
     for key in &keys {
+        // The catalog is a read scope, not a server presence bucket.
+        if key == paintsync::CATALOG_SCOPE {
+            continue;
+        }
         if let Err(e) = paintsync::report_presence(&cfg.cp_token, key).await {
             log::debug!("[sync] couldn't report presence on {key}: {e:#}");
         }
@@ -6023,7 +6034,7 @@ async fn pull_rosters(
 #[tauri::command]
 async fn sync_paints(app: tauri::AppHandle) -> Result<paintsync::PullOutcome, String> {
     emit_sync(&app, SyncEvent::phase("pulling"));
-    match pull_rosters(&app, None).await {
+    match pull_rosters(&app, None, true).await {
         Ok(o) => {
             emit_sync(&app, SyncEvent::pulled(&o));
             Ok(o)

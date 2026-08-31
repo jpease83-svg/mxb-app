@@ -234,7 +234,27 @@ fn resolve_with(
             })
             .collect();
 
-        if let Some(parent) = spec.parent.as_ref().map(|p| p.trim()).filter(|p| !p.is_empty()) {
+        if spec.slot == "goggles_paint" {
+            // Goggles may be installed under the selected helmet or under the rider profile.
+            // Prefer the helmet when both contain the same name, then the rider profile.
+            let preferred = [loadout.helmet.trim(), loadout.rider.trim()];
+            if let Some(parent) = preferred.into_iter().find(|parent| {
+                !parent.is_empty()
+                    && matches.iter().any(|e| {
+                        e.parent
+                            .as_deref()
+                            .map(|p| p.eq_ignore_ascii_case(parent))
+                            .unwrap_or(false)
+                    })
+            }) {
+                matches.retain(|e| {
+                    e.parent
+                        .as_deref()
+                        .map(|p| p.eq_ignore_ascii_case(parent))
+                        .unwrap_or(false)
+                });
+            }
+        } else if let Some(parent) = spec.parent.as_ref().map(|p| p.trim()).filter(|p| !p.is_empty()) {
             if spec.strict_parent || matches.iter().any(|e| {
                 e.parent.as_deref().map(|p| p.eq_ignore_ascii_case(parent)).unwrap_or(false)
             }) {
@@ -816,6 +836,30 @@ mod tests {
         };
         assert_eq!(dest("helmet_paint"), Some("rider/helmets/AGV/paints/Blue.pnt"));
         assert_eq!(dest("boots_paint"), Some("rider/boots/Tech10/paints/White.pnt"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn goggle_resolution_prefers_selected_helmet_then_rider_profile() {
+        let root = tmp("profile-goggles");
+        touch(&root.join("mods/rider/helmets/AGV/model.edf"));
+        touch(&root.join("mods/rider/helmets/AGV/goggles/Smoke.pnt"));
+        touch(&root.join("mods/rider/riders/Peasey/goggles/Smoke.pnt"));
+
+        let cfg = AppConfig { mods_path: root.to_string_lossy().into_owned(), ..Default::default() };
+        let mut loadout = Loadout::default();
+        loadout.helmet = "AGV".into();
+        loadout.rider = "Peasey".into();
+        loadout.goggles_paint = "Smoke".into();
+
+        let plans = plan_many_for_bikes(&cfg, &[("YZ250".to_string(), loadout.clone())]);
+        let goggle = plans[0].assets.iter().find(|a| a.slot == "goggles_paint").map(|a| a.rel_dest.as_str());
+        assert_eq!(goggle, Some("rider/helmets/AGV/goggles/Smoke.pnt"));
+
+        std::fs::remove_file(root.join("mods/rider/helmets/AGV/goggles/Smoke.pnt")).unwrap();
+        let plans = plan_many_for_bikes(&cfg, &[("YZ250".to_string(), loadout)]);
+        let goggle = plans[0].assets.iter().find(|a| a.slot == "goggles_paint").map(|a| a.rel_dest.as_str());
+        assert_eq!(goggle, Some("rider/riders/Peasey/goggles/Smoke.pnt"));
         let _ = std::fs::remove_dir_all(&root);
     }
 
