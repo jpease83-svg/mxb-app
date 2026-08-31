@@ -16,6 +16,15 @@ function inTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
+/**
+ * The first Paint Sync public beta deliberately uses manual releases. Tauri updater
+ * packages are signature-verified; until this fork owns a signing key, silently inheriting
+ * Frost's updater key/channel would either fail or, worse, point beta users at the wrong
+ * application. This build flag is set only by the Paint Sync public-beta workflow.
+ */
+const PAINTSYNC_PUBLIC_BETA =
+  import.meta.env.VITE_PAINTSYNC_PUBLIC_BETA === "1";
+
 /** localStorage key remembering the last update version the user dismissed. */
 const DISMISSED_UPDATE_KEY = "mxb-dismissed-update";
 
@@ -51,6 +60,21 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
 
   const check = useCallback(async ({ silent = false } = {}) => {
     if (!inTauri() || inFlight.current) return;
+
+    if (PAINTSYNC_PUBLIC_BETA) {
+      // Do not call the Tauri updater in this build. It cannot safely verify a Paint Sync
+      // package until the fork has its own updater signing key. Silent launch/poll checks
+      // remain truly silent; the Settings button explains the temporary manual channel.
+      setAvailable(null);
+      if (!silent) {
+        toast.info("Paint Sync beta updates are manual for now", {
+          description:
+            "Use the Paint Sync public-beta GitHub release page for the newest installer. Signed in-app updates are the next release-system step.",
+        });
+      }
+      return;
+    }
+
     inFlight.current = true;
     try {
       const update = await checkForUpdate();
@@ -74,6 +98,7 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
   }, [t]);
 
   const install = useCallback(async () => {
+    if (PAINTSYNC_PUBLIC_BETA) return;
     if (!available || installing) return;
     setInstalling(true);
     setProgress(null);
@@ -107,7 +132,8 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
     setAvailable(null);
   }, [available]);
 
-  // Check once on launch, then poll while the app stays open.
+  // Check once on launch, then poll while the app stays open. Public-beta checks are a
+  // cheap no-op until signing is configured, so this keeps the normal code path intact.
   useEffect(() => {
     void check({ silent: true });
     const id = setInterval(() => void check({ silent: true }), POLL_INTERVAL_MS);
