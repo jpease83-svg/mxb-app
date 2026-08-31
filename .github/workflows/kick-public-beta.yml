@@ -1,0 +1,29 @@
+name: Kick Final Paint Sync Beta Release
+
+on:
+  push:
+    branches:
+      - release/paintsync-public-beta-0.12.0
+    paths:
+      - ".github/workflows/kick-public-beta.yml"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch public-beta release workflow at current branch head
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api \
+            --method POST \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/346891837/dispatches" \
+            -f ref='release/paintsync-public-beta-0.12.0'
+          echo 'Public-beta release workflow dispatched.'
